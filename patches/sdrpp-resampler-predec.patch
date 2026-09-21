@@ -1,0 +1,18 @@
+diff --git a/core/src/dsp/multirate/rational_resampler.h b/core/src/dsp/multirate/rational_resampler.h
+index c823565..1d677b7 100644
+--- a/core/src/dsp/multirate/rational_resampler.h
++++ b/core/src/dsp/multirate/rational_resampler.h
+@@ -119,8 +119,11 @@ namespace dsp::multirate {
+ 
+         void reconfigure() {
+             // Calculate highest power-of-two decimation for the power decimator 
+-            int predecPower = std::min<int>(floor(log2(_inSamplerate / _outSamplerate)), PowerDecimator<T>::getMaxRatio());
+-            int predecRatio = std::min<int>(1 << predecPower, PowerDecimator<T>::getMaxRatio());
++            // Upsampling needs no power decimator. Never shift by a negative
++            // exponent (e.g. 24 kHz -> 48 kHz), or beyond the plan limit.
++            int maxPredecPower = int(log2(PowerDecimator<T>::getMaxRatio()));
++            int predecPower = std::clamp<int>(int(floor(log2(_inSamplerate / _outSamplerate))), 0, maxPredecPower);
++            int predecRatio = 1 << predecPower;
+             double intSamplerate = _inSamplerate;
+ 
+             // Configure the DDC

@@ -1,0 +1,2 @@
+# Context lines in an upstream patch must retain upstream whitespace.
+*.patch -whitespace

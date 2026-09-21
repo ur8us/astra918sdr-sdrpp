@@ -1,0 +1,6 @@
+build*/
+.cache/
+.vs/
+*.user
+__pycache__/
+*.pyc
