@@ -104,6 +104,21 @@ remotely during this local-only implementation.
 
 ## Isolated launch and tests
 
+For the existing local build, run this from the module repository:
+
+```sh
+./run_sdrpp.sh
+```
+
+The script also works when invoked by its path from another directory.
+It loads the Astra918 module for the combined CMX918 firmware, plus Radio and
+Audio Sink, using the matching sibling `../cmx918_sdrpp_upstream/build`.
+Press **Refresh**, select the receiver, then **Connect** and **Play**.
+The shell launcher defaults to hardware even if `ASTRA918_SIMULATOR` is set;
+pass `--simulator HOST:PORT` explicitly for offline use. Set `SDRPP_SOURCE` and
+`SDRPP_BUILD` to override the matching upstream paths. Other arguments, including
+`--module` and `--help`, pass through to the Python launcher.
+
 ```sh
 # Start ../astra918sdr/target/release/astra918-sim first.
 python3 scripts/run.py --sdrpp-source ../astra-sdrpp-core \
