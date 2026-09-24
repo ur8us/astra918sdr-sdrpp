@@ -12,19 +12,28 @@ Save, Retry and health counters. Source protocol code derives from the MIT
 
 Choose one **linked Radio VFO** in the source panel. Moving that VFO or tuning
 its selected frequency changes the shared receiver dial and hence WSJT-X.
-Mouse drags apply when released, keeping the spectrum steady during placement.
+With the **left-right** icon, the RF center stays fixed and the channel moves
+inside the current spectrum. The channel is limited to keep its entire USB/LSB
+passband in range. With the **center/aim** icon, the channel offset becomes zero
+and the RF center follows the dial. Mouse drags apply when released.
 CAT changes move the spectrum and linked VFO. Other VFOs remain independent.
 Dragging a secondary VFO outside the received spectrum clamps it inside that
 spectrum; select the linked VFO to change the shared receiver tuning.
 Select the linked VFO when using SDR++’s main frequency display for CAT tuning.
 
-The relation is `center = dial - offset`. Ordinary tuning preserves offset;
+The relation is `center = dial - offset`. CAT and the source's Tune button preserve offset;
 editing the offset preserves dial. The source adopts receiver state on connect.
 Its USB/LSB audio setting controls the firmware audio sent to WSJT-X. The Radio
 module’s demodulation mode controls only local SDR++ listening. Stop releases
 I/Q streaming but keeps receiver controls available; disconnect releases the
 vendor interface without resetting audio or CAT. Close/disconnect the standalone
 GUI before using this source.
+
+Update receiver firmware together with this module: the two tuning modes use
+atomic commands 38/39. An older image shows a firmware-update message rather
+than applying an incomplete retune. The LF/MF capacitor slider is clamped to
+0-4095, including keyboard entry. It applies while moving (at most ten updates
+per second) and sends the final value on release; there is no Apply button.
 
 Control commands and I/Q reads run on separate threads so receiver
 reconfiguration cannot starve the USB stream. Start first stops and drains any
@@ -115,14 +124,17 @@ It loads the Astra918 module for the combined CMX918 firmware, plus Radio and
 Audio Sink, using the matching sibling `../cmx918_sdrpp_upstream/build`.
 Press **Refresh**, select the receiver, then **Connect** and **Play**.
 The shell launcher defaults to hardware even if `ASTRA918_SIMULATOR` is set;
-pass `--simulator HOST:PORT` explicitly for offline use. Set `SDRPP_SOURCE` and
-`SDRPP_BUILD` to override the matching upstream paths. Other arguments, including
+simulator controls are absent in release builds. For offline use, build the
+module with `-DCMAKE_BUILD_TYPE=Debug` and pass
+`--module build-debug/astra918_source.so --simulator HOST:PORT` explicitly.
+Set `SDRPP_SOURCE` and `SDRPP_BUILD` to override the matching upstream paths. Other arguments, including
 `--module` and `--help`, pass through to the Python launcher.
 
 ```sh
 # Start ../astra918sdr/target/release/astra918-sim first.
 python3 scripts/run.py --sdrpp-source ../astra-sdrpp-core \
-  --sdrpp-build ../astra-sdrpp-core/build --simulator 127.0.0.1:7350
+  --sdrpp-build ../astra-sdrpp-core/build \
+  --module build-debug/astra918_source.so --simulator 127.0.0.1:7350
 # Exact module lifecycle test, with the simulator running:
 build/astra918_module_test "$PWD/build/astra918_source.so" 127.0.0.1:7350
 ```
@@ -133,9 +145,11 @@ The lifecycle test creates real upstream VFOs and exercises normal tuning,
 mouse-drag release, external CAT retunes, a secondary VFO, stream delivery,
 stop/restart/reconnect. The portable client test also injects stale I/Q bytes
 before Start to verify draining at reconnect.
-`ASTRA918_SIMULATOR=HOST:PORT` selects the simulator when launching SDR++ manually.
+`ASTRA918_SIMULATOR=HOST:PORT` selects the simulator only in Debug module builds.
 Without it, press Refresh and select the physical receiver serial later.
 
 Sanitizers: configure another directory with `-DASTRA918_SANITIZERS=ON` and run
 CTest. See [shared protocol](../astra918sdr/docs/PROTOCOL.md) and
 [validation record](../astra918sdr/docs/VALIDATION.md). No generator tests.
+The [control update tests](../astra918sdr/docs/CONTROLS-2026-09-24.md) cover the
+physical capacitor slider, fixed-center/center tuning and WSJT-X readback.

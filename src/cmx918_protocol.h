@@ -39,7 +39,9 @@ enum Command : uint8_t {
   SetAudioMode = 0x34,
   SetAudioFilter = 0x35,
   Save = 0x36,
-  Retry = 0x37
+  Retry = 0x37,
+  TuneChannel = 0x38,
+  TuneCenter = 0x39
 };
 enum class ErrorCode : uint8_t {
   Ok,

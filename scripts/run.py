@@ -19,6 +19,8 @@ source, build = args.sdrpp_source.resolve(), args.sdrpp_build.resolve()
 ext = '.dll' if sys.platform=='win32' else '.dylib' if sys.platform=='darwin' else '.so'
 exe = build/('sdrpp.exe' if sys.platform=='win32' else 'sdrpp')
 module = args.module or root/'build'/('astra918_source'+ext)
+if args.simulator and module.is_file() and b'ASTRA918_SIMULATOR' not in module.read_bytes():
+    p.error('Simulator connections require a Debug module; select it with --module')
 profile = root/'build/profile'
 modules = profile/'modules'; modules.mkdir(parents=True,exist_ok=True)
 for file in [module,build/'decoder_modules/radio'/('radio'+ext),build/'sink_modules/audio_sink'/('audio_sink'+ext)]:

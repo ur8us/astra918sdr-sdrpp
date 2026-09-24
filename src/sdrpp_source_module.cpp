@@ -71,7 +71,9 @@ class Source : public ModuleManager::Instance {
   int gain_draft[4]{};
   bool gain_active[4]{};
   int capacitor_draft = 0;
-  bool capacitor_dirty = false;
+  int capacitor_readback = -1;
+  bool capacitor_active = false, capacitor_pending = false;
+  Clock::time_point last_capacitor{};
   View snapshot() {
     std::lock_guard<std::mutex> lock(mutex);
     return view;
@@ -263,7 +265,11 @@ class Source : public ModuleManager::Instance {
         }
       } catch (const cmx::ProtocolError &e) {
         restore_tuning = true;
-        message(std::string("Not applied: ") + e.what());
+        if (e.code == cmx::ErrorCode::Command &&
+            (request.cmd == cmx::TuneChannel || request.cmd == cmx::TuneCenter))
+          message("Receiver firmware update required for SDR++ tuning modes");
+        else
+          message(std::string("Not applied: ") + e.what());
         if (device) {
           try {
             device->refresh();
@@ -402,23 +408,48 @@ class Source : public ModuleManager::Instance {
         now_dial =
             now_center + gui::waterfall.vfos.at(linked_vfo)->generalOffset;
       // Inspect completed UI changes before applying asynchronous readbacks.
+      const bool centered = gui::waterfall.VFOMoveSingleClick;
       if (std::isfinite(now_dial) &&
-          std::llround(now_dial) != int64_t(shown_dial)) {
+          (std::llround(now_dial) != int64_t(shown_dial) ||
+           now_center != double(shown_center))) {
         // Keep the spectrum fixed while the mouse places the VFO. Recentring
         // under a held cursor makes upstream treat that same cursor position
         // as another tune every frame. Apply the completed gesture once.
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
           return;
-        if (now_dial >= 70000 && now_dial <= 130000000) {
-          auto proposed = v.state;
+        auto proposed = v.state;
+        if (centered && now_dial >= 70000 && now_dial <= 130000000) {
           proposed.requested = uint64_t(std::llround(now_dial));
-          auto center = int64_t(proposed.requested) - proposed.offset;
-          if (center >= 70000 && center <= 130000000) {
-            proposed.center = uint64_t(center);
-            set(cmx::SetFrequency, cmx::integer(proposed.requested, 8));
-            render_tuning(proposed);
-            return;
-          }
+          proposed.center = proposed.requested;
+          proposed.offset = 0;
+          set(cmx::TuneCenter, cmx::integer(proposed.requested, 8));
+          render_tuning(proposed);
+          return;
+        } else if (!centered) {
+          // Normal tuning moves the shared audio/CAT channel inside the
+          // existing spectrum, including when upstream tries to recenter at
+          // an edge. Respect the firmware audio passband and its guard band.
+          const int low =
+              v.state.audio_mode == 2 ? -59500 : -59500 + v.state.audio_high;
+          const int high =
+              v.state.audio_mode == 2 ? 59500 - v.state.audio_high : 59500;
+          const auto minimum =
+              std::max<int64_t>(70000, int64_t(shown_center) + low);
+          const auto maximum =
+              std::min<int64_t>(130000000, int64_t(shown_center) + high);
+          const double dial =
+              std::clamp(now_dial, double(minimum), double(maximum));
+          proposed.requested = uint64_t(std::llround(dial));
+          proposed.center = shown_center;
+          proposed.offset =
+              int32_t(int64_t(proposed.requested) - int64_t(shown_center));
+          if (proposed.requested != v.state.requested)
+            set(cmx::TuneChannel, cmx::integer(proposed.requested, 8));
+          if (dial != now_dial)
+            message("Channel limited to this spectrum; select center tuning to "
+                    "retune");
+          render_tuning(proposed);
+          return;
         }
         render_tuning(v.state);
       }
@@ -435,6 +466,8 @@ class Source : public ModuleManager::Instance {
   }
   void connect() {
     ui_initialized = false;
+    capacitor_readback = -1;
+    capacitor_active = capacitor_pending = false;
     enqueue({Request::Connect, 0, {}, simulator ? address : serial, simulator});
   }
   void start() {
@@ -473,11 +506,14 @@ class Source : public ModuleManager::Instance {
     auto v = snapshot();
     ImGui::TextWrapped("%s", v.message.c_str());
     ImGui::BeginDisabled(v.connected);
+#ifndef NDEBUG
     ImGui::Checkbox("Offline simulator", &simulator);
     if (simulator) {
       field("Address");
       ImGui::InputText("##Address", address, sizeof(address));
-    } else {
+    } else
+#endif
+    {
       field("Receiver");
       if (ImGui::BeginCombo("##Receiver", serial.empty() ? "Select receiver"
                                                          : serial.c_str())) {
@@ -532,8 +568,8 @@ class Source : public ModuleManager::Instance {
       draft_dirty = false;
     }
     ImGui::Text("Spectrum center: %.6f MHz", s.center / 1e6);
-    ImGui::TextWrapped(
-        "Offset edits keep the CAT dial. Ordinary tuning keeps the offset.");
+    ImGui::TextWrapped("CAT and Tune keep the offset. Left-right tuning keeps "
+                       "the spectrum center; center tuning uses zero offset.");
     int mode = s.audio_mode == 2 ? 0 : 1;
     field("Firmware USB audio mode");
     if (ImGui::Combo("##USB audio mode", &mode, "USB\0LSB\0"))
@@ -570,14 +606,22 @@ class Source : public ModuleManager::Instance {
     }
     if (!iff)
       gain("IF gain", 1, s.if_gain, 31);
-    if (!capacitor_dirty)
+    if (capacitor_readback != s.lf_mf_capacitor && !capacitor_active &&
+        !capacitor_pending)
       capacitor_draft = s.lf_mf_capacitor;
-    field("LF/MF capacitor (0–4095)");
-    capacitor_dirty |= ImGui::InputInt("##LF/MF capacitor", &capacitor_draft);
-    if (ImGui::Button("Apply capacitor") && capacitor_draft >= 0 &&
-        capacitor_draft <= 4095) {
+    capacitor_readback = s.lf_mf_capacitor;
+    field("LF/MF capacitor (0-4095)");
+    capacitor_pending |=
+        ImGui::SliderInt("##LF/MF capacitor", &capacitor_draft, 0, 4095, "%d",
+                         ImGuiSliderFlags_AlwaysClamp);
+    capacitor_active = ImGui::IsItemActive();
+    capacitor_draft = std::clamp(capacitor_draft, 0, 4095);
+    if (capacitor_pending &&
+        (!capacitor_active ||
+         Clock::now() - last_capacitor >= std::chrono::milliseconds(100))) {
       set(cmx::SetLfMfCapacitor, cmx::integer(capacitor_draft, 2));
-      capacitor_dirty = false;
+      capacitor_pending = false;
+      last_capacitor = Clock::now();
     }
     ImGui::Text("Capacitance: %.1f pF",
                 cmx::lf_mf_capacitance_pf(s.lf_mf_capacitor));
@@ -676,6 +720,8 @@ public:
         s.handler.startHandler(s.handler.ctx);
         wait([&] { return count > 12000; });
         const auto before = s.snapshot().state.requested;
+        const auto fixed_center = s.snapshot().state.center;
+        gui::waterfall.VFOMoveSingleClick = false;
         ImGui::GetIO().MouseDown[ImGuiMouseButton_Left] = true;
         tuner::normalTuning("Astra test", double(before + 2000));
         s.tick();
@@ -687,12 +733,53 @@ public:
         s.tick();
         wait([&] { return s.snapshot().state.requested == before + 2000; });
         s.tick();
-        if (sigpath::vfoManager.getOffset("Astra test") != 10000)
-          throw std::runtime_error("Normal tune changed fixed offset");
+        if (sigpath::vfoManager.getOffset("Astra test") != 12000 ||
+            s.snapshot().state.center != fixed_center ||
+            gui::waterfall.getCenterFrequency() != double(fixed_center))
+          throw std::runtime_error("Normal tuning moved the RF center");
         if (cmx::simulator_cat(endpoint, "FA;") !=
             "FA" + std::string(11 - std::to_string(before + 2000).size(), '0') +
                 std::to_string(before + 2000) + ";")
           throw std::runtime_error("SDR tune did not propagate to CAT");
+        tuner::normalTuning("Astra test", double(before + 500000));
+        s.tick();
+        wait([&] { return s.snapshot().state.offset == 56000; });
+        if (s.snapshot().state.center != fixed_center)
+          throw std::runtime_error("Normal tuning escaped the fixed spectrum");
+        s.set(cmx::SetAudioMode, {1});
+        wait([&] { return s.snapshot().state.audio_mode == 1; });
+        tuner::normalTuning("Astra test", double(before + 500000));
+        s.tick();
+        wait([&] { return s.snapshot().state.offset == 59500; });
+        tuner::normalTuning("Astra test", double(before - 500000));
+        s.tick();
+        wait([&] { return s.snapshot().state.offset == -56000; });
+        s.set(cmx::SetAudioMode, {2});
+        wait([&] { return s.snapshot().state.audio_mode == 2; });
+        tuner::normalTuning("Astra test", double(before - 500000));
+        s.tick();
+        wait([&] { return s.snapshot().state.offset == -59500; });
+        if (s.snapshot().state.center != fixed_center)
+          throw std::runtime_error("Sideband edge tuning moved the RF center");
+        // Switching the mode must center even without changing the CAT dial.
+        gui::waterfall.VFOMoveSingleClick = true;
+        const auto edge_dial = s.snapshot().state.requested;
+        tuner::centerTuning("Astra test", double(edge_dial));
+        s.tick();
+        wait([&] { return s.snapshot().state.offset == 0; });
+        if (s.snapshot().state.center != edge_dial)
+          throw std::runtime_error("Center mode did not center the channel");
+        tuner::centerTuning("Astra test", double(before + 3000));
+        s.tick();
+        wait([&] { return s.snapshot().state.requested == before + 3000; });
+        if (s.snapshot().state.center != before + 3000 ||
+            sigpath::vfoManager.getOffset("Astra test") != 0)
+          throw std::runtime_error(
+              "Center tuning failed to move the RF center");
+        gui::waterfall.VFOMoveSingleClick = false;
+        s.set(cmx::SetOffset, cmx::integer(10000, 4));
+        wait([&] { return s.snapshot().state.offset == 10000; });
+        s.tick();
         const auto dial = s.snapshot().state.requested;
         gui::waterfall.selectedVFO = "Other test";
         tuner::normalTuning("Other test", double(dial + 15000));
@@ -763,10 +850,12 @@ public:
       linked_vfo = p.value("vfo", std::string());
     }
     config.release();
+#ifndef NDEBUG
     if (const char *sim = std::getenv("ASTRA918_SIMULATOR")) {
       simulator = true;
       std::snprintf(address, sizeof(address), "%s", sim);
     }
+#endif
     handler.ctx = this;
     handler.stream = &stream;
     handler.selectHandler = [](void *p) {
