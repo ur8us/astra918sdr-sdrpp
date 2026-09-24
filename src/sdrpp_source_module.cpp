@@ -43,7 +43,7 @@ struct Request {
   bool simulator = false;
 };
 class Source : public ModuleManager::Instance {
-  std::string name, linked_vfo, serial;
+  std::string name, serial;
   bool simulator = false, selected = false, enabled = true;
   char address[128] = "127.0.0.1:7350";
   SourceManager::SourceHandler handler{};
@@ -61,10 +61,9 @@ class Source : public ModuleManager::Instance {
   std::future<std::vector<cmx::DeviceInfo>> discovery;
   ImGuiContext *context = nullptr;
   ImGuiID frame_hook = 0, shutdown_hook = 0;
-  uint64_t shown_dial = 0, shown_center = 0;
+  uint64_t shown_center = 0;
   uint32_t shown_revision = UINT32_MAX;
   bool ui_initialized = false;
-  double dial_draft = 14200000;
   int offset_draft = 0, low_draft = 100, high_draft = 3500;
   bool draft_dirty = false;
   Clock::time_point last_gain{};
@@ -341,22 +340,14 @@ class Source : public ModuleManager::Instance {
       }
     }
   }
-  void choose_vfo() {
-    if (!linked_vfo.empty() && gui::waterfall.vfos.count(linked_vfo))
-      return;
-    if (gui::waterfall.vfos.size() == 1)
-      linked_vfo = gui::waterfall.vfos.begin()->first;
-  }
   void render_tuning(const cmx::State &s) {
     gui::waterfall.setCenterFrequency(double(s.center));
-    if (!linked_vfo.empty() && gui::waterfall.vfos.count(linked_vfo))
-      sigpath::vfoManager.setOffset(linked_vfo, double(s.offset));
-    if (gui::waterfall.selectedVFO == linked_vfo ||
-        gui::waterfall.selectedVFO.empty()) {
-      gui::freqSelect.setFrequency(s.requested);
-      gui::freqSelect.frequencyChanged = false;
-    }
-    shown_dial = s.requested;
+    const auto active = gui::waterfall.vfos.find(gui::waterfall.selectedVFO);
+    const double local_offset = active == gui::waterfall.vfos.end()
+                                    ? 0.0
+                                    : active->second->generalOffset;
+    gui::freqSelect.setFrequency(double(s.center) + local_offset);
+    gui::freqSelect.frequencyChanged = false;
     shown_center = s.center;
     shown_revision = s.revision;
     shown_generation = s.generation;
@@ -380,77 +371,27 @@ class Source : public ModuleManager::Instance {
     auto v = snapshot();
     if (!v.connected)
       return;
-    choose_vfo();
     if (restore_tuning.exchange(false))
       render_tuning(v.state);
     if (ui_initialized) {
-      double now_center = gui::waterfall.getCenterFrequency();
-      const auto active = gui::waterfall.selectedVFO;
-      if (now_center != double(shown_center) && !active.empty() &&
-          active != linked_vfo && gui::waterfall.vfos.count(active)) {
-        // Upstream auto-recenters the LO when a secondary VFO is dragged out
-        // of view. Keep that action local: only the linked channel owns CAT.
-        auto *other = gui::waterfall.vfos.at(active);
-        const double limit = std::max(0.0, 60000.0 - other->bandwidth);
-        const double offset =
-            std::clamp(now_center + other->generalOffset - double(shown_center),
-                       -limit, limit);
-        render_tuning(v.state);
-        sigpath::vfoManager.setOffset(active, offset);
-        gui::freqSelect.setFrequency(double(shown_center) + offset);
-        gui::freqSelect.frequencyChanged = false;
-        now_center = double(shown_center);
-        message("Secondary VFO limited to this spectrum; select the linked VFO "
-                "to retune");
-      }
-      double now_dial = now_center + v.state.offset;
-      if (!linked_vfo.empty() && gui::waterfall.vfos.count(linked_vfo))
-        now_dial =
-            now_center + gui::waterfall.vfos.at(linked_vfo)->generalOffset;
-      // Inspect completed UI changes before applying asynchronous readbacks.
-      const bool centered = gui::waterfall.VFOMoveSingleClick;
-      if (std::isfinite(now_dial) &&
-          (std::llround(now_dial) != int64_t(shown_dial) ||
-           now_center != double(shown_center))) {
-        // Keep the spectrum fixed while the mouse places the VFO. Recentring
-        // under a held cursor makes upstream treat that same cursor position
-        // as another tune every frame. Apply the completed gesture once.
+      const double now_center = gui::waterfall.getCenterFrequency();
+      // Only the waterfall center controls RF tuning. SDR++ Radio VFOs are
+      // independent of the firmware USB audio channel in either tuning mode.
+      if (now_center != double(shown_center)) {
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
           return;
-        auto proposed = v.state;
-        if (centered && now_dial >= 70000 && now_dial <= 130000000) {
+        const double now_dial = now_center + v.state.offset;
+        if (std::isfinite(now_center) && now_center >= 70000 &&
+            now_center <= 130000000 && now_dial >= 70000 &&
+            now_dial <= 130000000) {
+          auto proposed = v.state;
           proposed.requested = uint64_t(std::llround(now_dial));
-          proposed.center = proposed.requested;
-          proposed.offset = 0;
-          set(cmx::TuneCenter, cmx::integer(proposed.requested, 8));
-          render_tuning(proposed);
-          return;
-        } else if (!centered) {
-          // Normal tuning moves the shared audio/CAT channel inside the
-          // existing spectrum, including when upstream tries to recenter at
-          // an edge. Respect the firmware audio passband and its guard band.
-          const int low =
-              v.state.audio_mode == 2 ? -59500 : -59500 + v.state.audio_high;
-          const int high =
-              v.state.audio_mode == 2 ? 59500 - v.state.audio_high : 59500;
-          const auto minimum =
-              std::max<int64_t>(70000, int64_t(shown_center) + low);
-          const auto maximum =
-              std::min<int64_t>(130000000, int64_t(shown_center) + high);
-          const double dial =
-              std::clamp(now_dial, double(minimum), double(maximum));
-          proposed.requested = uint64_t(std::llround(dial));
-          proposed.center = shown_center;
-          proposed.offset =
-              int32_t(int64_t(proposed.requested) - int64_t(shown_center));
-          if (proposed.requested != v.state.requested)
-            set(cmx::TuneChannel, cmx::integer(proposed.requested, 8));
-          if (dial != now_dial)
-            message("Channel limited to this spectrum; select center tuning to "
-                    "retune");
+          proposed.center = uint64_t(std::llround(now_center));
+          set(cmx::SetFrequency, cmx::integer(proposed.requested, 8));
           render_tuning(proposed);
           return;
         }
+        message("Spectrum center or firmware audio frequency is out of range");
         render_tuning(v.state);
       }
     }
@@ -458,7 +399,6 @@ class Source : public ModuleManager::Instance {
         v.state.generation != shown_generation)
       render_tuning(v.state);
     if (!draft_dirty) {
-      dial_draft = double(v.state.requested);
       offset_draft = v.state.offset;
       low_draft = v.state.audio_low;
       high_draft = v.state.audio_high;
@@ -539,37 +479,19 @@ class Source : public ModuleManager::Instance {
       return;
     auto s = v.state;
     ImGui::Separator();
-    field("Linked Radio VFO");
-    if (ImGui::BeginCombo("##Linked Radio VFO", linked_vfo.empty()
-                                                    ? "Choose channel"
-                                                    : linked_vfo.c_str())) {
-      for (auto &entry : gui::waterfall.vfos) {
-        if (ImGui::Selectable(entry.first.c_str(), entry.first == linked_vfo)) {
-          linked_vfo = entry.first;
-          ui_initialized = false;
-        }
-      }
-      ImGui::EndCombo();
-    }
-    field("Receive frequency (Hz)");
-    draft_dirty |= ImGui::InputDouble("##Receive frequency", &dial_draft, 100,
-                                      1000, "%.0f");
-    if (ImGui::Button("Tune")) {
-      if (std::isfinite(dial_draft) && dial_draft >= 70000 &&
-          dial_draft <= 130000000)
-        set(cmx::SetFrequency,
-            cmx::integer(uint64_t(std::llround(dial_draft)), 8));
-      draft_dirty = false;
-    }
-    field("Channel offset (Hz)");
-    draft_dirty |= ImGui::InputInt("##Channel offset", &offset_draft);
-    if (ImGui::Button("Apply offset")) {
-      set(cmx::SetOffset, cmx::integer(uint32_t(offset_draft), 4));
-      draft_dirty = false;
-    }
     ImGui::Text("Spectrum center: %.6f MHz", s.center / 1e6);
-    ImGui::TextWrapped("CAT and Tune keep the offset. Left-right tuning keeps "
-                       "the spectrum center; center tuning uses zero offset.");
+    ImGui::Text("Firmware USB audio: %.6f MHz", s.requested / 1e6);
+    field("Firmware USB audio offset (Hz)");
+    draft_dirty |=
+        ImGui::InputInt("##Firmware USB audio offset", &offset_draft);
+    if (ImGui::Button("Apply offset")) {
+      const int64_t dial = int64_t(s.center) + offset_draft;
+      if (dial >= 70000 && dial <= 130000000)
+        set(cmx::TuneChannel, cmx::integer(uint64_t(dial), 8));
+      else
+        message("Firmware USB audio frequency is out of range");
+      draft_dirty = false;
+    }
     int mode = s.audio_mode == 2 ? 0 : 1;
     field("Firmware USB audio mode");
     if (ImGui::Combo("##USB audio mode", &mode, "USB\0LSB\0"))
@@ -688,7 +610,6 @@ public:
       s.simulator = true;
       std::snprintf(s.address, sizeof(s.address), "%s", endpoint);
       s.selected = true;
-      s.linked_vfo = "Astra test";
       std::atomic<uint64_t> count{0};
       std::atomic<bool> consume{true};
       std::thread reader([&] {
@@ -731,55 +652,30 @@ public:
           throw std::runtime_error("VFO drag retuned before mouse release");
         ImGui::GetIO().MouseDown[ImGuiMouseButton_Left] = false;
         s.tick();
-        wait([&] { return s.snapshot().state.requested == before + 2000; });
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
         s.tick();
         if (sigpath::vfoManager.getOffset("Astra test") != 12000 ||
+            s.snapshot().state.requested != before ||
+            s.snapshot().state.offset != 10000 ||
             s.snapshot().state.center != fixed_center ||
             gui::waterfall.getCenterFrequency() != double(fixed_center))
-          throw std::runtime_error("Normal tuning moved the RF center");
-        if (cmx::simulator_cat(endpoint, "FA;") !=
-            "FA" + std::string(11 - std::to_string(before + 2000).size(), '0') +
-                std::to_string(before + 2000) + ";")
-          throw std::runtime_error("SDR tune did not propagate to CAT");
-        tuner::normalTuning("Astra test", double(before + 500000));
-        s.tick();
-        wait([&] { return s.snapshot().state.offset == 56000; });
-        if (s.snapshot().state.center != fixed_center)
-          throw std::runtime_error("Normal tuning escaped the fixed spectrum");
-        s.set(cmx::SetAudioMode, {1});
-        wait([&] { return s.snapshot().state.audio_mode == 1; });
-        tuner::normalTuning("Astra test", double(before + 500000));
-        s.tick();
-        wait([&] { return s.snapshot().state.offset == 59500; });
-        tuner::normalTuning("Astra test", double(before - 500000));
-        s.tick();
-        wait([&] { return s.snapshot().state.offset == -56000; });
-        s.set(cmx::SetAudioMode, {2});
-        wait([&] { return s.snapshot().state.audio_mode == 2; });
-        tuner::normalTuning("Astra test", double(before - 500000));
-        s.tick();
-        wait([&] { return s.snapshot().state.offset == -59500; });
-        if (s.snapshot().state.center != fixed_center)
-          throw std::runtime_error("Sideband edge tuning moved the RF center");
-        // Switching the mode must center even without changing the CAT dial.
+          throw std::runtime_error("Local VFO tuning changed firmware audio");
         gui::waterfall.VFOMoveSingleClick = true;
-        const auto edge_dial = s.snapshot().state.requested;
-        tuner::centerTuning("Astra test", double(edge_dial));
+        const auto new_center = fixed_center + 3000;
+        tuner::centerTuning("Astra test", double(new_center));
         s.tick();
-        wait([&] { return s.snapshot().state.offset == 0; });
-        if (s.snapshot().state.center != edge_dial)
-          throw std::runtime_error("Center mode did not center the channel");
-        tuner::centerTuning("Astra test", double(before + 3000));
-        s.tick();
-        wait([&] { return s.snapshot().state.requested == before + 3000; });
-        if (s.snapshot().state.center != before + 3000 ||
+        wait([&] { return s.snapshot().state.center == new_center; });
+        const auto new_dial = new_center + 10000;
+        if (s.snapshot().state.requested != new_dial ||
+            s.snapshot().state.offset != 10000 ||
             sigpath::vfoManager.getOffset("Astra test") != 0)
           throw std::runtime_error(
-              "Center tuning failed to move the RF center");
+              "Center tuning did not preserve audio offset");
+        if (cmx::simulator_cat(endpoint, "FA;") !=
+            "FA" + std::string(11 - std::to_string(new_dial).size(), '0') +
+                std::to_string(new_dial) + ";")
+          throw std::runtime_error("Spectrum retune did not propagate to CAT");
         gui::waterfall.VFOMoveSingleClick = false;
-        s.set(cmx::SetOffset, cmx::integer(10000, 4));
-        wait([&] { return s.snapshot().state.offset == 10000; });
-        s.tick();
         const auto dial = s.snapshot().state.requested;
         gui::waterfall.selectedVFO = "Other test";
         tuner::normalTuning("Other test", double(dial + 15000));
@@ -789,13 +685,16 @@ public:
         if (s.snapshot().state.requested != dial)
           throw std::runtime_error("Secondary VFO changed CAT");
         tuner::normalTuning("Other test", double(dial + 500000));
+        const auto recentered = uint64_t(gui::waterfall.getCenterFrequency());
         s.tick();
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        wait([&] { return s.snapshot().state.center == recentered; });
         s.tick();
-        if (s.snapshot().state.requested != dial ||
+        if (s.snapshot().state.requested != recentered + 10000 ||
+            s.snapshot().state.offset != 10000 ||
             gui::waterfall.getCenterFrequency() !=
                 double(s.snapshot().state.center))
-          throw std::runtime_error("Secondary VFO recentered the receiver");
+          throw std::runtime_error(
+              "Waterfall recenter did not retune receiver");
         gui::waterfall.selectedVFO = "Astra test";
         if (cmx::simulator_cat(endpoint, "FA00007074049;FA;") !=
             "FA00007074049;")
@@ -803,18 +702,21 @@ public:
         wait([&] { return s.snapshot().state.requested == 7074049; });
         s.tick();
         if (gui::waterfall.getCenterFrequency() != 7064049 ||
-            sigpath::vfoManager.getOffset("Astra test") != 10000)
-          throw std::runtime_error("CAT did not propagate to spectrum/VFO");
+            sigpath::vfoManager.getOffset("Astra test") != 0)
+          throw std::runtime_error(
+              "CAT did not propagate to spectrum independently of VFO");
         auto n = count.load();
         wait([&] { return count > n + 12000; });
         s.stop();
         wait([&] { return !s.snapshot().playing; });
         if (!s.snapshot().state.configured)
           throw std::runtime_error("Stop stopped audio capture");
-        s.set(cmx::SetOffset, cmx::integer(uint32_t(-10000), 4));
+        const auto offset_center = s.snapshot().state.center;
+        s.set(cmx::TuneChannel, cmx::integer(offset_center - 10000, 8));
         wait([&] { return s.snapshot().state.offset == -10000; });
-        if (s.snapshot().state.requested != 7074049)
-          throw std::runtime_error("Offset edit moved CAT dial");
+        if (s.snapshot().state.center != offset_center ||
+            s.snapshot().state.requested != offset_center - 10000)
+          throw std::runtime_error("Audio offset edit moved spectrum center");
         s.start();
         n = count.load();
         wait([&] { return count > n + 12000; });
@@ -824,10 +726,11 @@ public:
         wait([&] { return !s.snapshot().connected; });
         s.connect();
         wait([&] { return s.snapshot().connected; });
-        if (s.snapshot().state.requested != 7074049)
+        if (s.snapshot().state.requested != offset_center - 10000)
           throw std::runtime_error("Reconnect overwrote receiver state");
-        flog::info("Astra module: linked VFO, independent secondary, CAT "
-                   "synchronization, stream/stop/reconnect passed");
+        flog::info(
+            "Astra module: independent VFOs, center plus audio offset, CAT "
+            "synchronization, stream/stop/reconnect passed");
       } catch (const std::exception &e) {
         flog::error("Astra module test failed: {0}", e.what());
         result = 1;
@@ -847,7 +750,6 @@ public:
     if (config.conf.contains(name)) {
       auto &p = config.conf[name];
       serial = p.value("serial", std::string());
-      linked_vfo = p.value("vfo", std::string());
     }
     config.release();
 #ifndef NDEBUG
@@ -873,8 +775,7 @@ public:
     handler.menuHandler = [](void *p) { static_cast<Source *>(p)->menu(); };
     handler.startHandler = [](void *p) { static_cast<Source *>(p)->start(); };
     handler.stopHandler = [](void *p) { static_cast<Source *>(p)->stop(); };
-    // The frame hook reads the final absolute linked VFO frequency; a source
-    // callback alone cannot distinguish normal SDR++ VFO motion from LO motion.
+    // The frame hook reads the final waterfall center after upstream tuning.
     handler.tuneHandler = [](double, void *) {};
     sigpath::sourceManager.registerSource(name, &handler);
     control_worker = std::thread([this] { control_loop(); });
@@ -894,7 +795,7 @@ public:
     delivery_worker.join();
     sigpath::sourceManager.unregisterSource(name);
     config.acquire();
-    config.conf[name] = {{"serial", serial}, {"vfo", linked_vfo}};
+    config.conf[name] = {{"serial", serial}};
     config.release(true);
   }
   void postInit() override { install_hook(); }

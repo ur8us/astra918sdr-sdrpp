@@ -2,7 +2,7 @@
 
 External SDR++ source for the Astra918 composite receiver. It streams 120 ksps
 ci16 I/Q while WSJT-X receives the independent USB audio channel and uses CAT.
-The source panel exposes dial, signed channel offset, firmware USB/LSB mode,
+The source panel exposes signed firmware USB audio offset, firmware USB/LSB mode,
 audio passband, antenna route, RF/IF gain modes and codes, LF controls, explicit
 Save, Retry and health counters. Source protocol code derives from the MIT
 `cmx918_sdrpp_source` project, revision
@@ -10,28 +10,28 @@ Save, Retry and health counters. Source protocol code derives from the MIT
 
 ## Frequency synchronization
 
-Choose one **linked Radio VFO** in the source panel. Moving that VFO or tuning
-its selected frequency changes the shared receiver dial and hence WSJT-X.
-With the **left-right** icon, the RF center stays fixed and the channel moves
-inside the current spectrum. The channel is limited to keep its entire USB/LSB
-passband in range. With the **center/aim** icon, the channel offset becomes zero
-and the RF center follows the dial. Mouse drags apply when released.
-CAT changes move the spectrum and linked VFO. Other VFOs remain independent.
-Dragging a secondary VFO outside the received spectrum clamps it inside that
-spectrum; select the linked VFO to change the shared receiver tuning.
-Select the linked VFO when using SDR++’s main frequency display for CAT tuning.
+The firmware audio/CAT frequency is `waterfall center + firmware USB audio offset`.
+All SDR++ Radio VFOs are independent local listening channels. With the
+**left-right** icon, moving a VFO inside the waterfall leaves the receiver and
+firmware audio tuning untouched. With the **center/aim** icon, SDR++ moves the
+waterfall center, which retunes the receiver while preserving the firmware audio
+offset. Any waterfall recenter, including upstream recentering at a spectrum
+edge, uses this same calculation. Mouse retunes apply when released.
 
-The relation is `center = dial - offset`. CAT and the source's Tune button preserve offset;
-editing the offset preserves dial. The source adopts receiver state on connect.
+CAT changes move the waterfall center to `CAT dial - firmware audio offset`;
+local VFO offsets stay unchanged. Editing **Firmware USB audio offset (Hz)**
+moves the firmware audio channel and CAT dial while keeping the RF center fixed.
+There is no linked VFO selector or separate source-panel frequency entry.
+The source adopts receiver state on connect.
 Its USB/LSB audio setting controls the firmware audio sent to WSJT-X. The Radio
 module’s demodulation mode controls only local SDR++ listening. Stop releases
 I/Q streaming but keeps receiver controls available; disconnect releases the
 vendor interface without resetting audio or CAT. Close/disconnect the standalone
 GUI before using this source.
 
-Update receiver firmware together with this module: the two tuning modes use
-atomic commands 38/39. An older image shows a firmware-update message rather
-than applying an incomplete retune. The LF/MF capacitor slider is clamped to
+Firmware audio offset edits use the existing atomic command 38. The receiver
+must support this command; older firmware shows a firmware-update message.
+The LF/MF capacitor slider is clamped to
 0-4095, including keyboard entry. It applies while moving (at most ten updates
 per second) and sends the final value on release; there is no Apply button.
 
@@ -151,5 +151,7 @@ Without it, press Refresh and select the physical receiver serial later.
 Sanitizers: configure another directory with `-DASTRA918_SANITIZERS=ON` and run
 CTest. See [shared protocol](../astra918sdr/docs/PROTOCOL.md) and
 [validation record](../astra918sdr/docs/VALIDATION.md). No generator tests.
-The [control update tests](../astra918sdr/docs/CONTROLS-2026-09-24.md) cover the
-physical capacitor slider, fixed-center/center tuning and WSJT-X readback.
+The [control update tests](../astra918sdr/docs/CONTROLS-2026-09-24.md) record the
+earlier physical control checks. The subsequent waterfall-center tuning
+correction was compiled on Linux only; its updated lifecycle checks and hardware
+tests were not run, as requested.
