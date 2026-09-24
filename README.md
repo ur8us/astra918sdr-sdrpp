@@ -12,6 +12,7 @@ Save, Retry and health counters. Source protocol code derives from the MIT
 
 Choose one **linked Radio VFO** in the source panel. Moving that VFO or tuning
 its selected frequency changes the shared receiver dial and hence WSJT-X.
+Mouse drags apply when released, keeping the spectrum steady during placement.
 CAT changes move the spectrum and linked VFO. Other VFOs remain independent.
 Dragging a secondary VFO outside the received spectrum clamps it inside that
 spectrum; select the linked VFO to change the shared receiver tuning.
@@ -24,6 +25,12 @@ module’s demodulation mode controls only local SDR++ listening. Stop releases
 I/Q streaming but keeps receiver controls available; disconnect releases the
 vendor interface without resetting audio or CAT. Close/disconnect the standalone
 GUI before using this source.
+
+Control commands and I/Q reads run on separate threads so receiver
+reconfiguration cannot starve the USB stream. Start first stops and drains any
+partial frame left by a previous owner or stalled transfer. Neither operation
+resets the composite USB device. While playing, the log reports sample totals
+and receiver fault counters every ten seconds.
 
 ## Portable library
 
@@ -108,7 +115,9 @@ build/astra918_module_test "$PWD/build/astra918_source.so" 127.0.0.1:7350
 The launcher creates only `build/profile/`, loads Astra918, Radio and Audio Sink,
 and leaves normal SDR++ preferences alone. Press Connect and Play in the source.
 The lifecycle test creates real upstream VFOs and exercises normal tuning,
-external CAT retunes, a secondary VFO, stream delivery, stop/restart/reconnect.
+mouse-drag release, external CAT retunes, a secondary VFO, stream delivery,
+stop/restart/reconnect. The portable client test also injects stale I/Q bytes
+before Start to verify draining at reconnect.
 `ASTRA918_SIMULATOR=HOST:PORT` selects the simulator when launching SDR++ manually.
 Without it, press Refresh and select the physical receiver serial later.
 

@@ -111,9 +111,56 @@ class Source : public ModuleManager::Instance {
   }
   void control_loop() {
     std::unique_ptr<cmx::Device> device;
-    cmx::AstraDecoder decoder;
     bool playing = false;
-    auto poll = Clock::now(), last_data = Clock::now();
+    auto poll = Clock::now();
+    auto report = Clock::now();
+    std::atomic<uint64_t> samples{0};
+    std::atomic<bool> reader_stop{true};
+    std::thread reader;
+    std::string reader_error; // protected by mutex
+    auto stop_reader = [&] {
+      reader_stop = true;
+      if (reader.joinable())
+        reader.join();
+    };
+    auto start_reader = [&] {
+      reader_stop = false;
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        reader_error.clear();
+      }
+      // Only this thread reads the I/Q endpoint. The control owner keeps the
+      // Device alive until join, and owns all accesses to its state snapshot.
+      reader = std::thread([&, active = device.get()] {
+        cmx::AstraDecoder decoder;
+        auto last_data = Clock::now();
+        try {
+          while (!reader_stop && !quitting) {
+            auto bytes = active->read_iq();
+            if (reader_stop || quitting)
+              break;
+            if (!bytes.empty()) {
+              last_data = Clock::now();
+              auto frames = decoder.feed(bytes);
+              std::lock_guard<std::mutex> lock(mutex);
+              for (auto &frame : frames) {
+                samples += frame.samples.size();
+                if (blocks.size() >= 128)
+                  throw std::runtime_error("Host I/Q queue overflow");
+                blocks.push_back(std::move(frame));
+              }
+              wake.notify_all();
+            } else if (Clock::now() - last_data > std::chrono::seconds(2))
+              throw std::runtime_error(
+                  "I/Q timed out; CAT/audio remain independent");
+          }
+        } catch (const std::exception &e) {
+          std::lock_guard<std::mutex> lock(mutex);
+          reader_error = e.what();
+          wake.notify_all();
+        }
+      });
+    };
     while (!quitting) {
       Request request{};
       bool have = false;
@@ -126,13 +173,23 @@ class Source : public ModuleManager::Instance {
         }
       }
       try {
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          if (!reader_error.empty()) {
+            auto error = std::move(reader_error);
+            reader_error.clear();
+            throw std::runtime_error(error);
+          }
+        }
         if (have) {
           if (request.kind == Request::Connect) {
+            stop_reader();
+            if (device)
+              device->stop();
             device.reset();
             playing = false;
             delivering = false;
             clear_blocks();
-            decoder = cmx::AstraDecoder{};
             device = std::make_unique<cmx::Device>(
                 request.simulator ? cmx::open_tcp(request.target)
                                   : cmx::open_usb(request.target));
@@ -140,6 +197,7 @@ class Source : public ModuleManager::Instance {
             publish(*device, false);
             poll = Clock::now();
           } else if (request.kind == Request::Disconnect) {
+            stop_reader();
             if (device) {
               device->stop();
             }
@@ -153,18 +211,23 @@ class Source : public ModuleManager::Instance {
             view.message = "Disconnected";
           } else if (device) {
             if (request.kind == Request::Start) {
+              stop_reader();
+              clear_blocks();
               device->start();
-              decoder = cmx::AstraDecoder{};
+              samples = 0;
+              report = Clock::now();
+              flog::info("Astra918 I/Q started, generation {0}",
+                         device->state.generation);
               playing = true;
               delivering = true;
               stream.clearWriteStop();
-              last_data = Clock::now();
+              start_reader();
             } else if (request.kind == Request::Stop) {
+              stop_reader();
               playing = false;
               delivering = false;
               clear_blocks();
               device->stop();
-              decoder = cmx::AstraDecoder{};
             } else {
               device->state = cmx::State::decode(
                   device->command(request.cmd, request.payload));
@@ -178,30 +241,25 @@ class Source : public ModuleManager::Instance {
           device->refresh();
           publish(*device, playing);
           poll = Clock::now();
+          if (playing && Clock::now() - report >= std::chrono::seconds(10)) {
+            const auto &s = device->state;
+            flog::info("Astra918 samples={0} dial={1} offset={2} drops={3} "
+                       "capture={4} usb={5} audio={6}/{7}/{8}",
+                       samples.load(), s.requested, s.offset, s.dropped,
+                       s.capture_faults, s.usb_faults, s.audio_under,
+                       s.audio_over, s.audio_stalls);
+            report = Clock::now();
+          }
           if (playing &&
               (!device->state.streaming || !device->state.configured))
             throw std::runtime_error(
                 "Receiver stopped I/Q or reported a fault");
         }
-        if (device && playing) {
-          auto bytes = device->read_iq();
-          if (!bytes.empty()) {
-            last_data = Clock::now();
-            auto frames = decoder.feed(bytes);
-            std::lock_guard<std::mutex> lock(mutex);
-            for (auto &frame : frames) {
-              if (blocks.size() >= 128)
-                throw std::runtime_error("Host I/Q queue overflow");
-              blocks.push_back(std::move(frame));
-            }
-            wake.notify_all();
-          } else if (Clock::now() - last_data > std::chrono::seconds(2))
-            throw std::runtime_error(
-                "I/Q timed out; CAT/audio remain independent");
-        } else {
+        {
           std::unique_lock<std::mutex> lock(mutex);
-          wake.wait_for(lock, std::chrono::milliseconds(10),
-                        [&] { return quitting || !requests.empty(); });
+          wake.wait_for(lock, std::chrono::milliseconds(10), [&] {
+            return quitting || !requests.empty() || !reader_error.empty();
+          });
         }
       } catch (const cmx::ProtocolError &e) {
         restore_tuning = true;
@@ -211,12 +269,21 @@ class Source : public ModuleManager::Instance {
             device->refresh();
             publish(*device, playing);
           } catch (...) {
+            stop_reader();
             device.reset();
             failed = true;
+            playing = false;
+            delivering = false;
+            clear_blocks();
+            std::lock_guard<std::mutex> lock(mutex);
+            view.connected = false;
+            view.playing = false;
           }
         }
       } catch (const std::exception &e) {
+        flog::error("Astra918 source: {0}", e.what());
         message(e.what());
+        stop_reader();
         device.reset();
         playing = false;
         delivering = false;
@@ -227,6 +294,7 @@ class Source : public ModuleManager::Instance {
         view.playing = false;
       }
     }
+    stop_reader();
     if (device) {
       try {
         device->stop();
@@ -336,6 +404,11 @@ class Source : public ModuleManager::Instance {
       // Inspect completed UI changes before applying asynchronous readbacks.
       if (std::isfinite(now_dial) &&
           std::llround(now_dial) != int64_t(shown_dial)) {
+        // Keep the spectrum fixed while the mouse places the VFO. Recentring
+        // under a held cursor makes upstream treat that same cursor position
+        // as another tune every frame. Apply the completed gesture once.
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+          return;
         if (now_dial >= 70000 && now_dial <= 130000000) {
           auto proposed = v.state;
           proposed.requested = uint64_t(std::llround(now_dial));
@@ -603,7 +676,14 @@ public:
         s.handler.startHandler(s.handler.ctx);
         wait([&] { return count > 12000; });
         const auto before = s.snapshot().state.requested;
+        ImGui::GetIO().MouseDown[ImGuiMouseButton_Left] = true;
         tuner::normalTuning("Astra test", double(before + 2000));
+        s.tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        s.tick();
+        if (s.snapshot().state.requested != before)
+          throw std::runtime_error("VFO drag retuned before mouse release");
+        ImGui::GetIO().MouseDown[ImGuiMouseButton_Left] = false;
         s.tick();
         wait([&] { return s.snapshot().state.requested == before + 2000; });
         s.tick();

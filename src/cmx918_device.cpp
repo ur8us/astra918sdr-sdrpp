@@ -66,7 +66,13 @@ void Device::lf_mf_capacitor(uint16_t code) {
   if (!state.configured || state.lf_mf_capacitor != code)
     throw std::runtime_error("Receiver did not apply LF/MF capacitor tuning");
 }
-void Device::start() { state = State::decode(command(Start)); }
+void Device::start() {
+  // A previous owner or a stalled transfer can leave an incomplete frame in
+  // the USB FIFO even after reconnect. Establish a clean boundary before the
+  // new generation; never reset the composite device or its audio/CAT paths.
+  stop();
+  state = State::decode(command(Start));
+}
 void Device::stop() {
   state = State::decode(command(Stop));
   // Caller joins its I/Q reader first. STOP may leave a partial old frame in
