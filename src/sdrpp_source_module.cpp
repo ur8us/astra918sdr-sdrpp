@@ -30,6 +30,34 @@ SDRPP_MOD_INFO{"astra918_source",
 namespace {
 ConfigManager config;
 using Clock = std::chrono::steady_clock;
+const char *firmware_error_name(uint32_t error) {
+  switch (error) {
+  case 0:
+    return "none";
+  case 1:
+    return "protocol error";
+  case 2:
+    return "frequency error";
+  case 3:
+    return "unsupported profile";
+  case 4:
+    return "unqualified configuration";
+  case 5:
+    return "CMX918 I2C error";
+  case 6:
+    return "receiver configuration timeout";
+  case 7:
+    return "CMX918 readback error";
+  case 8:
+    return "receiver not configured";
+  case 9:
+    return "capture error";
+  case 10:
+    return "USB error";
+  default:
+    return "unknown receiver error";
+  }
+}
 struct View {
   cmx::State state;
   cmx::Capabilities capabilities;
@@ -593,8 +621,8 @@ class Source : public ModuleManager::Instance {
     ImGui::TextWrapped("Audio underruns %u; overruns %u; stalls %u",
                        s.audio_under, s.audio_over, s.audio_stalls);
     ImGui::TextWrapped("120 kHz sample span; the receiver filters roll off "
-                       "near the edges. Error %u",
-                       s.error);
+                       "near the edges. Last receiver error: %u (%s)",
+                       s.error, firmware_error_name(s.error));
   }
   void install_hook() {
     if (context || !ImGui::GetCurrentContext())

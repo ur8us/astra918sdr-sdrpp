@@ -38,9 +38,10 @@ ProtocolError::ProtocolError(ErrorCode c)
           "Astra918 error " + std::to_string(unsigned(c)) + ": " +
           std::array<const char *, 11>{
               "OK", "invalid command", "bad version", "bad length",
-              "invalid argument",
-              "unsupported command", "receiver busy", "channel exceeds spectrum bounds",
-              "CMX918 I2C error", "PLL/calibration timeout", "internal error"}
+              "invalid argument", "unsupported command", "receiver busy",
+              "channel exceeds spectrum bounds",
+              "receiver I/O/configuration error", "PLL/calibration timeout",
+              "internal error"}
               .at(unsigned(c))),
       code(c) {}
 Bytes record(uint8_t cmd, uint32_t seq, const Bytes &p, ErrorCode e) {
