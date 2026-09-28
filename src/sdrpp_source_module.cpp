@@ -396,8 +396,8 @@ class Source : public ModuleManager::Instance {
           return;
         const double now_dial = now_center + v.state.offset;
         if (std::isfinite(now_center) && now_center >= 70000 &&
-            now_center <= 170000000 && now_dial >= 70000 &&
-            now_dial <= 170000000) {
+            now_center <= 260000000 && now_dial >= 70000 &&
+            now_dial <= 260000000) {
           auto proposed = v.state;
           proposed.requested = uint64_t(std::llround(now_dial));
           proposed.center = uint64_t(std::llround(now_center));
@@ -500,7 +500,7 @@ class Source : public ModuleManager::Instance {
         ImGui::InputInt("##Firmware USB audio offset", &offset_draft);
     if (ImGui::Button("Apply offset")) {
       const int64_t dial = int64_t(s.center) + offset_draft;
-      if (dial >= 70000 && dial <= 170000000)
+      if (dial >= 70000 && dial <= 260000000)
         set(cmx::TuneChannel, cmx::integer(uint64_t(dial), 8));
       else
         message("Firmware USB audio frequency is out of range");
