@@ -559,7 +559,7 @@ class Source : public ModuleManager::Instance {
         set(cmx::SetReference, {uint8_t(reference)});
     }
     if (v.capabilities.logical_gpio) {
-      ImGui::TextUnformatted("Logical GPIO (pins unassigned)");
+      ImGui::TextUnformatted("Logical GPIO");
       for (int i = 0; i < 8; ++i) {
         if (i % 4)
           ImGui::SameLine();
