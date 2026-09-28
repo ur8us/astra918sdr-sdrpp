@@ -26,9 +26,9 @@ There is no linked VFO selector or separate source-panel frequency entry.
 The source adopts receiver state on connect.
 Its USB/LSB audio setting controls the firmware audio sent to WSJT-X. The Radio
 module’s demodulation mode controls only local SDR++ listening. Stop releases
-I/Q streaming but keeps receiver controls available; disconnect releases the
-vendor interface without resetting audio or CAT. Close/disconnect the standalone
-GUI before using this source.
+I/Q streaming and disconnects the receiver, releasing the vendor interface
+without resetting audio or CAT. SDR++ Play connects the receiver and starts I/Q;
+Stop disconnects it. Close/disconnect the standalone GUI before using this source.
 
 Firmware audio offset edits use the existing atomic command 38. The receiver
 must support this command; older firmware shows a firmware-update message.

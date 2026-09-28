@@ -65,7 +65,7 @@ struct View {
   std::string message = "Disconnected";
 };
 struct Request {
-  enum Kind { Connect, Disconnect, Start, Stop, Set } kind;
+  enum Kind { Connect, Disconnect, Start, Set } kind;
   uint8_t cmd = 0;
   cmx::Bytes payload;
   std::string target;
@@ -214,6 +214,14 @@ class Source : public ModuleManager::Instance {
             throw std::runtime_error(error);
           }
         }
+        if (have && request.kind == Request::Start && !device) {
+          device = std::make_unique<cmx::Device>(
+              request.simulator ? cmx::open_tcp(request.target)
+                                : cmx::open_usb(request.target));
+          message("Connected; adopted receiver settings");
+          publish(*device, false);
+          poll = Clock::now();
+        }
         if (have) {
           if (request.kind == Request::Connect) {
             stop_reader();
@@ -255,12 +263,6 @@ class Source : public ModuleManager::Instance {
               delivering = true;
               stream.clearWriteStop();
               start_reader();
-            } else if (request.kind == Request::Stop) {
-              stop_reader();
-              playing = false;
-              delivering = false;
-              clear_blocks();
-              device->stop();
             } else {
               device->state = cmx::State::decode(
                   device->command(request.cmd, request.payload));
@@ -460,15 +462,12 @@ class Source : public ModuleManager::Instance {
     discovery = std::async(std::launch::async, cmx::enumerate_usb);
   }
   void start() {
-    auto v = snapshot();
-    if (!v.connected)
-      connect();
-    enqueue({Request::Start, 0, {}, {}});
+    enqueue({Request::Start, 0, {}, simulator ? address : serial, simulator});
   }
   void stop() {
     delivering = false;
     stream.stopWriter();
-    enqueue({Request::Stop, 0, {}, {}});
+    enqueue({Request::Disconnect, 0, {}, {}});
   }
   void gain(const char *label, int block, uint8_t value, int maximum) {
     int &n = gain_draft[block];
@@ -518,13 +517,6 @@ class Source : public ModuleManager::Instance {
         refresh_receivers();
     }
     ImGui::EndDisabled();
-    if (ImGui::Button(v.connected ? "Disconnect" : "Connect")) {
-      if (v.connected) {
-        stop();
-        enqueue({Request::Disconnect, 0, {}, {}});
-      } else
-        connect();
-    }
     ImGui::TextWrapped("I/Q: 120 ksps; USB audio: 12 kHz mono");
     if (!v.connected)
       return;
@@ -779,9 +771,11 @@ public:
         auto n = count.load();
         wait([&] { return count > n + 12000; });
         s.stop();
-        wait([&] { return !s.snapshot().playing; });
-        if (!s.snapshot().state.configured)
-          throw std::runtime_error("Stop stopped audio capture");
+        wait([&] { return !s.snapshot().playing && !s.snapshot().connected; });
+        s.start();
+        wait([&] { return s.snapshot().playing && s.snapshot().connected; });
+        n = count.load();
+        wait([&] { return count > n + 12000; });
         const auto offset_center = s.snapshot().state.center;
         s.set(cmx::TuneChannel, cmx::integer(offset_center - 10000, 8));
         wait([&] { return s.snapshot().state.offset == -10000; });
@@ -792,13 +786,11 @@ public:
         n = count.load();
         wait([&] { return count > n + 12000; });
         s.stop();
-        wait([&] { return !s.snapshot().playing; });
-        s.enqueue({Request::Disconnect, 0, {}, {}});
-        wait([&] { return !s.snapshot().connected; });
-        s.connect();
-        wait([&] { return s.snapshot().connected; });
+        wait([&] { return !s.snapshot().playing && !s.snapshot().connected; });
+        s.start();
+        wait([&] { return s.snapshot().connected && s.snapshot().playing; });
         if (s.snapshot().state.requested != offset_center - 10000)
-          throw std::runtime_error("Reconnect overwrote receiver state");
+          throw std::runtime_error("Play reconnect overwrote receiver state");
         flog::info(
             "Astra module: independent VFOs, center plus audio offset, CAT "
             "synchronization, stream/stop/reconnect passed");
@@ -841,7 +833,6 @@ public:
       auto &s = *static_cast<Source *>(p);
       s.selected = false;
       s.stop();
-      s.enqueue({Request::Disconnect, 0, {}, {}});
     };
     handler.menuHandler = [](void *p) { static_cast<Source *>(p)->menu(); };
     handler.startHandler = [](void *p) { static_cast<Source *>(p)->start(); };
