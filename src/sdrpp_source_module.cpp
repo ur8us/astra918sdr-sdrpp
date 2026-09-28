@@ -88,6 +88,7 @@ class Source : public ModuleManager::Instance {
   std::atomic<bool> restore_tuning{false};
   std::vector<cmx::DeviceInfo> devices;
   std::future<std::vector<cmx::DeviceInfo>> discovery;
+  bool discovery_attempted = false;
   ImGuiContext *context = nullptr;
   ImGuiID frame_hook = 0, shutdown_hook = 0;
   uint64_t shown_center = 0;
@@ -452,6 +453,12 @@ class Source : public ModuleManager::Instance {
     capacitor_active = capacitor_pending = false;
     enqueue({Request::Connect, 0, {}, simulator ? address : serial, simulator});
   }
+  void refresh_receivers() {
+    if (discovery.valid())
+      return;
+    discovery_attempted = true;
+    discovery = std::async(std::launch::async, cmx::enumerate_usb);
+  }
   void start() {
     auto v = snapshot();
     if (!v.connected)
@@ -485,6 +492,8 @@ class Source : public ModuleManager::Instance {
     ImGui::SetNextItemWidth(-1);
   }
   void menu() {
+    if (!simulator && !discovery_attempted)
+      refresh_receivers();
     auto v = snapshot();
     ImGui::TextWrapped("%s", v.message.c_str());
     ImGui::BeginDisabled(v.connected);
@@ -505,8 +514,8 @@ class Source : public ModuleManager::Instance {
         }
         ImGui::EndCombo();
       }
-      if (ImGui::Button("Refresh") && !discovery.valid())
-        discovery = std::async(std::launch::async, cmx::enumerate_usb);
+      if (ImGui::Button("Refresh"))
+        refresh_receivers();
     }
     ImGui::EndDisabled();
     if (ImGui::Button(v.connected ? "Disconnect" : "Connect")) {
