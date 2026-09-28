@@ -32,6 +32,7 @@ ConfigManager config;
 using Clock = std::chrono::steady_clock;
 struct View {
   cmx::State state;
+  cmx::Capabilities capabilities;
   bool connected = false, playing = false;
   std::string message = "Disconnected";
 };
@@ -84,6 +85,7 @@ class Source : public ModuleManager::Instance {
   void publish(cmx::Device &d, bool playing) {
     std::lock_guard<std::mutex> lock(mutex);
     view.state = d.state;
+    view.capabilities = d.capabilities;
     view.connected = true;
     view.playing = playing;
   }
@@ -97,7 +99,8 @@ class Source : public ModuleManager::Instance {
     // command.
     if (r.kind == Request::Set && !requests.empty() &&
         requests.back().kind == Request::Set && requests.back().cmd == r.cmd &&
-        (r.cmd != cmx::SetGain || requests.back().payload[0] == r.payload[0]))
+        ((r.cmd != cmx::SetGain && r.cmd != cmx::UpdateGpio) ||
+         requests.back().payload[0] == r.payload[0]))
       requests.back() = std::move(r);
     else
       requests.push_back(std::move(r));
@@ -252,9 +255,14 @@ class Source : public ModuleManager::Instance {
             report = Clock::now();
           }
           if (playing &&
-              (!device->state.streaming || !device->state.configured))
-            throw std::runtime_error(
-                "Receiver stopped I/Q or reported a fault");
+              (!device->state.streaming || !device->state.configured)) {
+            stop_reader();
+            playing = false;
+            delivering = false;
+            clear_blocks();
+            publish(*device, false);
+            message("Receiver stopped I/Q or reported a fault; change reference or retry");
+          }
         }
         {
           std::unique_lock<std::mutex> lock(mutex);
@@ -272,6 +280,12 @@ class Source : public ModuleManager::Instance {
         if (device) {
           try {
             device->refresh();
+            if (!device->state.configured) {
+              stop_reader();
+              playing = false;
+              delivering = false;
+              clear_blocks();
+            }
             publish(*device, playing);
           } catch (...) {
             stop_reader();
@@ -382,8 +396,8 @@ class Source : public ModuleManager::Instance {
           return;
         const double now_dial = now_center + v.state.offset;
         if (std::isfinite(now_center) && now_center >= 70000 &&
-            now_center <= 130000000 && now_dial >= 70000 &&
-            now_dial <= 130000000) {
+            now_center <= 170000000 && now_dial >= 70000 &&
+            now_dial <= 170000000) {
           auto proposed = v.state;
           proposed.requested = uint64_t(std::llround(now_dial));
           proposed.center = uint64_t(std::llround(now_center));
@@ -486,7 +500,7 @@ class Source : public ModuleManager::Instance {
         ImGui::InputInt("##Firmware USB audio offset", &offset_draft);
     if (ImGui::Button("Apply offset")) {
       const int64_t dial = int64_t(s.center) + offset_draft;
-      if (dial >= 70000 && dial <= 130000000)
+      if (dial >= 70000 && dial <= 170000000)
         set(cmx::TuneChannel, cmx::integer(uint64_t(dial), 8));
       else
         message("Firmware USB audio frequency is out of range");
@@ -508,6 +522,26 @@ class Source : public ModuleManager::Instance {
         set(cmx::SetAudioFilter, p);
       }
       draft_dirty = false;
+    }
+    ImGui::Separator();
+    if (v.capabilities.reference_clock) {
+      int reference = s.reference_clock;
+      field("38.4 MHz reference");
+      if (ImGui::Combo("##38.4 MHz reference", &reference, "Internal\0External\0"))
+        set(cmx::SetReference, {uint8_t(reference)});
+    }
+    if (v.capabilities.logical_gpio) {
+      ImGui::TextUnformatted("Logical GPIO (pins unassigned)");
+      for (int i = 0; i < 8; ++i) {
+        if (i % 4)
+          ImGui::SameLine();
+        bool enabled = (s.gpio & (1u << i)) != 0;
+        std::string label = "GPIO" + std::to_string(i);
+        if (ImGui::Checkbox(label.c_str(), &enabled)) {
+          uint8_t mask = uint8_t(1u << i);
+          set(cmx::UpdateGpio, {mask, uint8_t(enabled ? mask : 0)});
+        }
+      }
     }
     ImGui::Separator();
     int input = s.input;

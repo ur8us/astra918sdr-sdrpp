@@ -32,7 +32,12 @@ Bytes Device::command(uint8_t cmd, const Bytes &p) {
     throw;
   }
 }
-State Device::refresh() { return state = State::decode(command(Status)); }
+State Device::refresh() {
+  state = State::decode(command(Status));
+  capabilities.reference_clock = state.features & 64;
+  capabilities.logical_gpio = state.features & 128;
+  return state;
+}
 void Device::frequency(uint64_t v) {
   state = State::decode(command(SetFrequency, integer(v, 8)));
 }

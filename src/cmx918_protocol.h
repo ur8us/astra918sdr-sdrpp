@@ -41,7 +41,9 @@ enum Command : uint8_t {
   Save = 0x36,
   Retry = 0x37,
   TuneChannel = 0x38,
-  TuneCenter = 0x39
+  TuneCenter = 0x39,
+  SetReference = 0x3a,
+  UpdateGpio = 0x3b
 };
 enum class ErrorCode : uint8_t {
   Ok,
@@ -74,7 +76,7 @@ struct Capabilities {
   uint8_t inputs = 0, filter_mode = 0, manual_rf_inputs = 0;
   bool usb_decimated_120 = false, wide_fir = false, lf_mf_capacitor = false;
   bool manual_lf_rf = false;
-  bool register_access = false;
+  bool register_access = false, reference_clock = false, logical_gpio = false;
   std::vector<uint32_t> rates;
   std::vector<int16_t> rf_gains, if_gains;
   static Capabilities decode(const Bytes &);
@@ -100,6 +102,7 @@ struct State {
   int16_t rssi = 0;
   uint32_t sequence = 0;
   uint16_t lf_mf_capacitor = 0;
+  uint8_t reference_clock = 0, gpio = 0, features = 0;
   static State decode(const Bytes &);
   Bytes encode() const;
 };

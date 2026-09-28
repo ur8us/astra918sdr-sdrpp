@@ -75,7 +75,7 @@ Bytes response(const Bytes &b, uint8_t cmd, uint32_t seq) {
 }
 Capabilities Capabilities::decode(const Bytes &b) {
   if (b.size() != 204 || u32(b, 0) != 2 || b[29] != 39 || b[30] != 32 ||
-      (b[31] & ~63) || !(b[31] & 1) || b[199] != 1 || u32(b, 194) != 40 ||
+      !(b[31] & 1) || b[199] != 1 || u32(b, 194) != 40 ||
       u32(b, 200) != 512)
     throw std::runtime_error("Unsupported capability layout");
   Capabilities c;
@@ -130,12 +130,15 @@ State State::decode(const Bytes &b) {
   s.audio_mode = b[92];
   s.audio_low = u16(b, 94);
   s.audio_high = u16(b, 116);
+  s.reference_clock = b[118];
+  s.gpio = b[119];
+  s.features = b[120];
   s.revision = u32(b, 96);
   s.audio_under = u32(b, 100);
   s.audio_over = u32(b, 104);
   s.audio_stalls = u32(b, 108);
   s.saved_revision = u32(b, 112);
-  if ((s.audio_mode != 1 && s.audio_mode != 2) || s.audio_low >= s.audio_high ||
+  if (s.reference_clock > 1 || (s.audio_mode != 1 && s.audio_mode != 2) || s.audio_low >= s.audio_high ||
       s.audio_high > 5000)
     throw std::runtime_error("Invalid audio state");
   s.requested = u64(b, 0);
@@ -182,6 +185,9 @@ Bytes State::encode() const {
   put(b, 108, audio_stalls, 4);
   put(b, 112, saved_revision, 4);
   put(b, 116, audio_high, 2);
+  b[118] = reference_clock;
+  b[119] = gpio;
+  b[120] = features;
   put(b, 0, requested, 8);
   put(b, 8, actual, 8);
   put(b, 16, rate, 4);
