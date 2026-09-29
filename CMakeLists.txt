@@ -72,11 +72,8 @@ if(ASTRA918_BUILD_MODULE)
     if(WIN32)
       get_filename_component(SDRPP_CORE_LIBRARY_DIR "${SDRPP_CORE_LIBRARY}" DIRECTORY)
       get_filename_component(SDRPP_CORE_LIBRARY_NAME "${SDRPP_CORE_LIBRARY}" NAME_WE)
-      add_library(astra918_sdrpp_core SHARED IMPORTED GLOBAL)
-      set_target_properties(astra918_sdrpp_core PROPERTIES
-        IMPORTED_IMPLIB "${SDRPP_CORE_LIBRARY}"
-        IMPORTED_LOCATION "${SDRPP_CORE_LIBRARY_DIR}/${SDRPP_CORE_LIBRARY_NAME}.dll")
-      target_link_libraries(astra918_source PRIVATE astra918_sdrpp_core)
+      target_link_directories(astra918_source PRIVATE "${SDRPP_CORE_LIBRARY_DIR}")
+      target_link_libraries(astra918_source PRIVATE "${SDRPP_CORE_LIBRARY_NAME}")
     else()
       target_link_libraries(astra918_source PRIVATE "${SDRPP_CORE_LIBRARY}")
     endif()
