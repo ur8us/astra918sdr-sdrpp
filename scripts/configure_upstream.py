@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 source = pathlib.Path(sys.argv[1]).resolve()
-patch = pathlib.Path(__file__).resolve().parent.parent / "patches/sdrpp-resampler-predec.patch"
+patch = pathlib.Path(__file__).resolve().parent / "compat/sdrpp-resampler-predec.patch"
 # Apply only the reviewed compatibility fix; accept an already applied patch.
 reverse = subprocess.run(["git", "-C", str(source), "apply", "--reverse", "--check", str(patch)],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

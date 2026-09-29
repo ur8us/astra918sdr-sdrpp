@@ -1,5 +1,100 @@
 # Astra918 SDR++ source
 
+![Astra918 source module in SDR++ with WSJT-X](images/astra918-sdrpp-wsjtx.png)
+
+## Install the Astra918 module into SDR++
+
+These steps install the external source module into an existing SDR++ desktop
+installation. You do not rebuild SDR++ itself. SDR++ modules use a C++ ABI, so
+the module must match the SDR++ core build and architecture. The release notes
+identify the upstream SDR++ commit used for each build; use the corresponding
+SDR++ nightly/source build. A module is not guaranteed to load in a distro
+package built from a different revision or with an incompatible compiler.
+
+1. Install and launch the official SDR++ desktop build for your operating
+   system. Close SDR++ before copying any module files.
+2. Open the [latest Astra918 module release](https://github.com/ur8us/astra918sdr-sdrpp/releases/latest).
+   Download the asset matching both your operating system and CPU:
+
+   | SDR++ platform | Release asset |
+   | --- | --- |
+   | Linux x86-64 | `astra918_source-linux-x86_64.so` |
+   | Linux ARM 64-bit (AArch64) | `astra918_source-linux-aarch64.so` |
+   | Linux RISC-V 64-bit | `astra918_source-linux-riscv64.so` |
+   | macOS Intel | `astra918_source-macos-x86_64.dylib` |
+   | macOS Apple Silicon | `astra918_source-macos-arm64.dylib` |
+   | Windows 64-bit | `astra918_source-windows-x86_64.dll` |
+
+   Do not use a Linux file on macOS, or a file for a different CPU. The release
+   also includes a text file naming the exact SDR++ source commit used by CI.
+   On Windows, download `libusb-1.0.dll` from the same release as a required
+   runtime dependency.
+3. Put the downloaded module in SDR++'s module directory. Common locations are:
+   - Linux official packages: `/usr/lib/sdrpp/plugins/` (may require
+     administrator privileges). Alternatively, use a writable directory and
+     add its module file to the `modules` list described in step 4. Install
+     the system `libusb-1.0` runtime package if it is not already present.
+   - Windows portable installation: `<SDR++ folder>\\modules\\`. If this
+     folder is absent, create it beside `sdrpp.exe` and set `modulesDirectory`
+     in `root_dev/config.json` to that folder. Keep any `libusb-1.0.dll`
+     supplied with the release beside `sdrpp.exe`.
+   - macOS app bundle: `SDR++.app/Contents/Plugins/`. If macOS blocks loading
+     an unsigned third-party module, use an SDR++ build and security policy
+     that permits locally built modules; do not disable system security
+     globally. Install the Homebrew `libusb` runtime (`brew install libusb`)
+     if the loader reports a missing libusb library.
+4. If you used the configured module directory, no config edit is needed:
+   SDR++ scans `modulesDirectory` at startup. If you chose another folder,
+   open SDR++'s `config.json` (usually `~/.config/sdrpp/config.json` on Linux
+   and macOS, or `<SDR++ folder>/root_dev/config.json` on Windows). Back it up,
+   then add the full path to the module in the existing top-level `modules`
+   array. For example on Linux:
+
+   ```json
+   "modules": [
+     "/home/alex/sdrpp-modules/astra918_source-linux-x86_64.so"
+   ]
+   ```
+
+   Preserve other entries and valid JSON commas. On Windows, use escaped
+   backslashes, for example `"C:\\\\SDR++\\\\modules\\\\astra918_source.dll"`.
+   Do not replace the rest of the configuration file.
+5. Start SDR++ and open **Module Manager**. Find **Astra918 audio/CAT/SDR
+   receiver**, enable its instance if necessary, then open **Source** and
+   choose Astra918. The main **Play** button connects to the receiver and
+   starts I/Q streaming. The first connection may need a moment for USB device
+   discovery.
+6. If the module is absent, inspect SDR++'s startup log. Check the module
+   filename and configured path, CPU architecture, SDR++ core commit, and
+   runtime dependencies. On Linux, `ldd <module-file>` shows missing shared
+   libraries; on macOS use `otool -L <module-file>`; on Windows use a DLL
+   dependency viewer. Restore the backed-up config if a JSON edit prevents
+   SDR++ from starting.
+
+### Instructions for an AI setup agent
+
+The following may be given to a local computer-use or shell-capable AI agent:
+
+> Set up the Astra918 external source module for the existing SDR++ installation
+> on this computer. First detect the OS, CPU architecture, SDR++ executable,
+> module directory, configuration file, and SDR++ build/revision. Download only
+> the matching asset from
+> https://github.com/ur8us/astra918sdr-sdrpp/releases/latest and check the
+> release's SDR++ source commit against this installation. If compatibility
+> cannot be established, stop and explain the mismatch. Close SDR++ and back up
+> its configuration before changing it. Prefer the configured module directory;
+> otherwise add only the absolute module path to the existing top-level
+> `modules` array, preserving all other JSON values. Install any runtime
+> dependency shipped with the release beside the executable where required.
+> Restart SDR++, verify that Module Manager lists Astra918, and report the
+> exact asset, path, compatibility check, and any load errors. Do not overwrite
+> SDR++, change unrelated settings, or bypass operating-system security.
+
+The source and protocol are developed in the [main Astra918 firmware
+repository](https://github.com/ur8us/astra918sdr). Hardware and software
+connections are discussed in the [EEVblog Astra918 project
+thread](https://www.eevblog.com/forum/rf-microwave/astra918-cmx918rp2350-based-receiver-0-07-to-130-mhz/).
+
 External SDR++ source for the Astra918 composite receiver. It streams 120 ksps
 ci16 I/Q while WSJT-X receives the independent USB audio channel and uses CAT.
 The source panel exposes signed firmware USB audio offset, firmware USB/LSB mode,
