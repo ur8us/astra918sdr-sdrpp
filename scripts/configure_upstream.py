@@ -4,6 +4,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import os
 
 source = pathlib.Path(sys.argv[1]).resolve()
 patch = pathlib.Path(__file__).resolve().parent / "compat/sdrpp-resampler-predec.patch"
@@ -17,5 +18,6 @@ options = re.findall(r"option\((OPT_BUILD_\w+)", (source / "CMakeLists.txt").rea
 # The source selector supplies I/Q only. Keep the radio demodulator and audio
 # sink so the runnable SDR++ profile has LSB/USB/AM/FM receiver controls.
 enabled = {"OPT_BUILD_RADIO", "OPT_BUILD_AUDIO_SINK"}
-subprocess.run(["cmake", "-S", str(source), "-B", str(source / "build"), "-G", "Ninja",
+generator = os.environ.get("ASTRA_CMAKE_GENERATOR", "Ninja")
+subprocess.run(["cmake", "-S", str(source), "-B", str(source / "build"), "-G", generator,
                 "-DCMAKE_BUILD_TYPE=Release"] + [f"-D{name}={'ON' if name in enabled else 'OFF'}" for name in options] + sys.argv[2:], check=True)
