@@ -59,8 +59,8 @@ jobs:
         shell: pwsh
         run: |
           & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install fftw3:x64-windows glfw3:x64-windows zstd:x64-windows volk:x64-windows libusb:x64-windows
-          New-Item -ItemType Directory -Force "C:\Program Files\PothosSDR\include", "C:\Program Files\PothosSDR\lib" | Out-Null
-          New-Item -ItemType Junction -Force "C:\Program Files\PothosSDR\include\volk" "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\include\volk" | Out-Null
+          New-Item -ItemType Directory -Force -Path "C:\Program Files\PothosSDR\include", "C:\Program Files\PothosSDR\lib" | Out-Null
+          New-Item -ItemType Junction -Force -Path "C:\Program Files\PothosSDR\include\volk" -Target "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\include\volk" | Out-Null
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\volk.lib" "C:\Program Files\PothosSDR\lib\volk.lib"
       - name: Configure matching SDR++ core (Windows)
         if: runner.os == 'Windows'
