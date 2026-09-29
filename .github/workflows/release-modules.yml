@@ -103,7 +103,7 @@ jobs:
         env:
           ASSET: ${{ matrix.asset }}
         run: |
-          cmake -S . -B build-module -G Ninja -DCMAKE_BUILD_TYPE=Release `
+          cmake -S . -B build-module -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DASTRA918_BUILD_MODULE=ON -DSDRPP_SOURCE_DIR=sdrpp `
             -DSDRPP_CORE_LIBRARY=sdrpp/build/core/Release/sdrpp_core.lib `
