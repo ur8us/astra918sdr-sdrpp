@@ -116,33 +116,29 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
         with:
-          repository: AlexandreRouma/SDRPlusPlus
-          ref: 8c9f5ee8fe405775bfcd62c8c8f8c0fc928a64af
-          path: sdrpp
-          submodules: recursive
-      - name: Install RISC-V cross toolchain and target libraries
+          platforms: riscv64
+      - name: Build in RISC-V Ubuntu environment
         run: |
-          sudo dpkg --add-architecture riscv64
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build pkg-config g++-riscv64-linux-gnu \
-            libusb-1.0-0-dev:riscv64 libfftw3-dev:riscv64 libglfw3-dev:riscv64 \
-            libvolk-dev:riscv64 libzstd-dev:riscv64
-      - name: Cross-build module
-        env:
-          PKG_CONFIG_LIBDIR: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          PKG_CONFIG_SYSROOT_DIR: /
-        run: |
-          cmake -S . -B build-module -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=riscv64 \
-            -DCMAKE_C_COMPILER=riscv64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=riscv64-linux-gnu-g++ \
-            -DASTRA918_BUILD_MODULE=ON -DSDRPP_SOURCE_DIR=sdrpp
-          cmake --build build-module --target astra918_source --parallel 4
-          mkdir dist
-          cp build-module/astra918_source.so dist/astra918_source-linux-riscv64.so
-          echo "$SDRPP_COMMIT" > dist/SDRPP_COMMIT.txt
+          docker run --rm --platform linux/riscv64 \
+            -e SDRPP_COMMIT="$SDRPP_COMMIT" \
+            -v "$GITHUB_WORKSPACE:/src" -w /src riscv64/ubuntu:24.04 bash -euc '
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y cmake ninja-build pkg-config g++ git python3 \
+                libusb-1.0-0-dev libfftw3-dev libglfw3-dev libvolk-dev libzstd-dev
+              git clone --recursive https://github.com/AlexandreRouma/SDRPlusPlus.git sdrpp
+              git -C sdrpp checkout 8c9f5ee8fe405775bfcd62c8c8f8c0fc928a64af
+              git -C sdrpp submodule update --init --recursive
+              python3 scripts/configure_upstream.py sdrpp \
+                -DOPT_BUILD_RADIO=OFF -DOPT_BUILD_AUDIO_SINK=OFF
+              cmake -S . -B build-module -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DASTRA918_BUILD_MODULE=ON -DSDRPP_SOURCE_DIR=sdrpp
+              cmake --build build-module --target astra918_source --parallel 4
+              mkdir -p dist
+              cp build-module/astra918_source.so dist/astra918_source-linux-riscv64.so
+              echo "$SDRPP_COMMIT" > dist/SDRPP_COMMIT.txt
+            '
       - uses: actions/upload-artifact@v4
         with:
           name: module-linux-riscv64
