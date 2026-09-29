@@ -64,7 +64,7 @@ jobs:
         shell: pwsh
         env:
           ASTRA_CMAKE_GENERATOR: Visual Studio 17 2022
-        run: python scripts/configure_upstream.py sdrpp "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DOPT_BUILD_RADIO=OFF -DOPT_BUILD_AUDIO_SINK=OFF
+        run: python scripts/configure_upstream.py sdrpp "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" "-DCMAKE_CXX_FLAGS=/I$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/include" "-DCMAKE_SHARED_LINKER_FLAGS=/LIBPATH:$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/lib" -DOPT_BUILD_RADIO=OFF -DOPT_BUILD_AUDIO_SINK=OFF
       - name: Configure matching SDR++ core
         if: runner.os != 'Windows'
         run: python3 scripts/configure_upstream.py sdrpp -DOPT_BUILD_RADIO=OFF -DOPT_BUILD_AUDIO_SINK=OFF
@@ -102,7 +102,8 @@ jobs:
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
             -DASTRA918_BUILD_MODULE=ON -DSDRPP_SOURCE_DIR=sdrpp `
             -DSDRPP_CORE_LIBRARY=sdrpp/build/core/Release/sdrpp_core.lib `
-            "-DSDRPP_SDK_INCLUDE_DIRS=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/include"
+            "-DSDRPP_SDK_INCLUDE_DIRS=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/include" `
+            "-DSDRPP_SDK_LIBRARIES=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/lib/volk.lib"
           cmake --build build-module --config Release --parallel 4
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build-module/Release/astra918_source.dll "dist/astra918_source-$env:ASSET.dll"
