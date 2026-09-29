@@ -59,6 +59,7 @@ if(ASTRA918_BUILD_MODULE)
   target_include_directories(astra918_source PRIVATE "${SDRPP_SOURCE_DIR}/core/src" "${SDRPP_SOURCE_DIR}/core/src/imgui")
   # External SDK include/library paths, especially non-system macOS/Windows prefixes.
   target_include_directories(astra918_source PRIVATE ${SDRPP_SDK_INCLUDE_DIRS})
+  target_link_directories(astra918_source PRIVATE ${SDRPP_SDK_LIBRARY_DIRS})
   target_link_libraries(astra918_source PRIVATE ${SDRPP_SDK_LIBRARIES})
   if(PkgConfig_FOUND)
     pkg_check_modules(SDRPP_DEPS QUIET IMPORTED_TARGET volk fftw3f glfw3)
@@ -68,7 +69,17 @@ if(ASTRA918_BUILD_MODULE)
   endif()
   target_link_libraries(astra918_source PRIVATE astra918)
   if(SDRPP_CORE_LIBRARY)
-    target_link_libraries(astra918_source PRIVATE "${SDRPP_CORE_LIBRARY}")
+    if(WIN32)
+      get_filename_component(SDRPP_CORE_LIBRARY_DIR "${SDRPP_CORE_LIBRARY}" DIRECTORY)
+      get_filename_component(SDRPP_CORE_LIBRARY_NAME "${SDRPP_CORE_LIBRARY}" NAME_WE)
+      add_library(astra918_sdrpp_core SHARED IMPORTED GLOBAL)
+      set_target_properties(astra918_sdrpp_core PROPERTIES
+        IMPORTED_IMPLIB "${SDRPP_CORE_LIBRARY}"
+        IMPORTED_LOCATION "${SDRPP_CORE_LIBRARY_DIR}/${SDRPP_CORE_LIBRARY_NAME}.dll")
+      target_link_libraries(astra918_source PRIVATE astra918_sdrpp_core)
+    else()
+      target_link_libraries(astra918_source PRIVATE "${SDRPP_CORE_LIBRARY}")
+    endif()
   elseif(APPLE)
     # SDR++ resolves core symbols from the hosting executable when it loads a
     # third-party module. macOS requires this explicit linker mode.
