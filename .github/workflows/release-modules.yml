@@ -58,10 +58,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install fftw3:x64-windows glfw3:x64-windows zstd:x64-windows volk:x64-windows libusb:x64-windows
-          New-Item -ItemType Directory -Force -Path "C:\Program Files\PothosSDR\include", "C:\Program Files\PothosSDR\lib" | Out-Null
-          New-Item -ItemType Junction -Force -Path "C:\Program Files\PothosSDR\include\volk" -Target "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\include\volk" | Out-Null
-          Copy-Item "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\lib\volk.lib" "C:\Program Files\PothosSDR\lib\volk.lib"
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install fftw3:x64-windows glfw3:x64-windows zstd:x64-windows libusb:x64-windows
+          python -m pip install mako
+          git clone --recursive --depth 1 --branch v3.3.0 https://github.com/gnuradio/volk.git "$env:RUNNER_TEMP/volk"
+          cmake -S "$env:RUNNER_TEMP/volk" -B "$env:RUNNER_TEMP/volk-build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF -DENABLE_MODTOOL=OFF "-DCMAKE_INSTALL_PREFIX=C:/Program Files/PothosSDR"
+          cmake --build "$env:RUNNER_TEMP/volk-build" --config Release --parallel 4
+          cmake --install "$env:RUNNER_TEMP/volk-build" --config Release
       - name: Configure matching SDR++ core (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -106,7 +108,7 @@ jobs:
             -DASTRA918_BUILD_MODULE=ON -DSDRPP_SOURCE_DIR=sdrpp `
             -DSDRPP_CORE_LIBRARY=sdrpp/build/core/Release/sdrpp_core.lib `
             "-DSDRPP_SDK_INCLUDE_DIRS=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/include" `
-            "-DSDRPP_SDK_LIBRARIES=$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/lib/volk.lib"
+            "-DSDRPP_SDK_LIBRARIES=C:/Program Files/PothosSDR/lib/volk.lib"
           cmake --build build-module --config Release --parallel 4
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build-module/Release/astra918_source.dll "dist/astra918_source-$env:ASSET.dll"
