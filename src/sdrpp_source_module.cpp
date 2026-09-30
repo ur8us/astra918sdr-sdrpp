@@ -462,6 +462,9 @@ class Source : public ModuleManager::Instance {
     discovery = std::async(std::launch::async, cmx::enumerate_usb);
   }
   void start() {
+    // Another source module's post-init hook can overwrite the selected
+    // source's DSP rate. Restore the receiver's rate when Play is pressed.
+    core::setInputSampleRate(120000);
     enqueue({Request::Start, 0, {}, simulator ? address : serial, simulator});
   }
   void stop() {
@@ -649,6 +652,7 @@ class Source : public ModuleManager::Instance {
 
 public:
   static int self_test(const char *endpoint) {
+    core::args.defineAll();
     auto *ctx = ImGui::CreateContext();
     static dsp::stream<dsp::complex_t> dummy;
     sigpath::iqFrontEnd.init(

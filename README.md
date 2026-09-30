@@ -66,7 +66,9 @@ package built from a different revision or with an incompatible compiler.
    receiver**, enable its instance if necessary, then open **Source** and
    choose Astra918. The main **Play** button connects to the receiver and
    starts I/Q streaming. The first connection may need a moment for USB device
-   discovery.
+   discovery. The spectrum span should be 120 kHz. On systems with other source
+   modules installed, Astra918 restores its 120 kHz DSP rate when Play starts;
+   an unrelated module may have changed the global rate during startup.
 6. If the module is absent, inspect SDR++'s startup log. Check the module
    filename and configured path, CPU architecture, SDR++ core commit, and
    runtime dependencies. On Linux, `ldd <module-file>` shows missing shared
