@@ -1,5 +1,8 @@
 # Astra918 SDR++ source
 
+The screenshot shows SDR++ running alongside WSJT-X, without a virtual audio
+cable, with bidirectional frequency synchronization between the programs.
+
 ![Astra918 source module in SDR++ with WSJT-X](images/astra918-sdrpp-wsjtx.png)
 
 ## Install the Astra918 module into SDR++
