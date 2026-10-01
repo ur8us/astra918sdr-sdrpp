@@ -2,6 +2,7 @@ name: Build and publish SDR++ modules
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -186,3 +187,10 @@ jobs:
           files: dist/**
           overwrite_files: true
           make_latest: true
+      - name: Match release source archives to the published modules
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/rolling" \
+            -f sha="${GITHUB_SHA}" -F force=true
