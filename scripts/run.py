@@ -19,6 +19,11 @@ source, build = args.sdrpp_source.resolve(), args.sdrpp_build.resolve()
 ext = '.dll' if sys.platform=='win32' else '.dylib' if sys.platform=='darwin' else '.so'
 exe = build/('sdrpp.exe' if sys.platform=='win32' else 'sdrpp')
 module = args.module or root/'build'/('astra918_source'+ext)
+if args.module is None and (root/'build'/'CMakeCache.txt').is_file():
+    # The default module comes from this build tree. Keep it in sync with the
+    # source before copying it into the isolated SDR++ profile.
+    subprocess.run(['cmake', '--build', str(root/'build'),
+                    '--target', 'astra918_source', '--parallel', '4'], check=True)
 if args.simulator and module.is_file() and b'ASTRA918_SIMULATOR' not in module.read_bytes():
     p.error('Simulator connections require a Debug module; select it with --module')
 profile = root/'build/profile'

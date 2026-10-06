@@ -222,6 +222,9 @@ For the existing local build, run this from the module repository:
 ```
 
 The script also works when invoked by its path from another directory.
+For its default module, it rebuilds `build/astra918_source.so` before copying
+that module into the isolated profile, so source changes appear after restarting
+SDR++.
 It loads the Astra918 module for the combined CMX918 firmware, plus Radio and
 Audio Sink, using the matching sibling `../cmx918_sdrpp_upstream/build`.
 Press **Refresh**, select the receiver, then **Connect** and **Play**.
