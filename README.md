@@ -104,6 +104,7 @@ External SDR++ source for the Astra918 composite receiver. It streams 120 ksps
 ci16 I/Q while WSJT-X receives the independent USB audio channel and uses CAT.
 The source panel exposes signed firmware USB audio offset, firmware USB/LSB mode,
 audio passband, antenna route, RF/IF gain modes and codes, LF controls,
+VFO sign (Auto, LO above or below), IF frequency (Auto, 96 or 120 kHz),
 38.4 MHz internal/external reference and eight logical GPIO values, explicit
 Save, Retry and health counters. Source protocol code derives from the MIT
 `cmx918_sdrpp_source` project, revision

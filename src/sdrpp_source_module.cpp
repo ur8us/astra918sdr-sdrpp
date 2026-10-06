@@ -556,6 +556,18 @@ class Source : public ModuleManager::Instance {
       draft_dirty = false;
     }
     ImGui::Separator();
+    if (v.capabilities.vfo_if_selection) {
+      int sign = s.vfo_sign;
+      field("VFO sign");
+      if (ImGui::Combo("##VFO sign", &sign,
+                       "Auto\0LO above the signal\0LO below the signal\0"))
+        set(cmx::SetVfoSign, {uint8_t(sign)});
+      int frequency = s.if_frequency;
+      field("IF frequency");
+      if (ImGui::Combo("##IF frequency", &frequency,
+                       "Auto (96 kHz)\0" "96 kHz\0" "120 kHz\0"))
+        set(cmx::SetIfFrequency, {uint8_t(frequency)});
+    }
     if (v.capabilities.reference_clock) {
       int reference = s.reference_clock;
       field("38.4 MHz reference");
