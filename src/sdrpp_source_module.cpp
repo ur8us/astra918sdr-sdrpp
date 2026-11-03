@@ -536,6 +536,7 @@ class Source : public ModuleManager::Instance {
         if (ImGui::Button("Refresh"))
           refresh_receivers();
       }
+      ImGui::Separator();
       return;
     }
     if (v.message != "Connected; adopted transceiver settings")
@@ -640,6 +641,7 @@ class Source : public ModuleManager::Instance {
     ImGui::TextWrapped("120 kHz sample span; the receiver filters roll off "
                        "near the edges. Last receiver error: %u (%s)",
                        s.error, firmware_error_name(s.error));
+    ImGui::Separator();
   }
   void install_hook() {
     if (context || !ImGui::GetCurrentContext())
