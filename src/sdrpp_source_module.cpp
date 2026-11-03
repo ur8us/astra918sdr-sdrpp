@@ -148,6 +148,7 @@ class Source : public ModuleManager::Instance {
     auto poll = Clock::now();
     auto report = Clock::now();
     std::atomic<uint64_t> samples{0};
+    std::atomic<uint64_t> host_drops{0};
     std::atomic<bool> reader_stop{true};
     std::thread reader;
     std::string reader_error; // protected by mutex
@@ -178,8 +179,12 @@ class Source : public ModuleManager::Instance {
               std::lock_guard<std::mutex> lock(mutex);
               for (auto &frame : frames) {
                 samples += frame.samples.size();
-                if (blocks.size() >= 128)
-                  throw std::runtime_error("Host I/Q queue overflow");
+                if (blocks.size() >= 128) {
+                  // A new generation waits for the GUI to adopt its tuning.
+                  // Keep recent frames if that GUI/status update is delayed.
+                  blocks.pop_front();
+                  host_drops++;
+                }
                 blocks.push_back(std::move(frame));
               }
               wake.notify_all();
@@ -260,6 +265,7 @@ class Source : public ModuleManager::Instance {
               clear_blocks();
               device->start();
               samples = 0;
+              host_drops = 0;
               report = Clock::now();
               flog::info("Astra918 I/Q started, generation {0}",
                          device->state.generation);
@@ -277,26 +283,32 @@ class Source : public ModuleManager::Instance {
           }
         }
         if (device && Clock::now() - poll >= std::chrono::milliseconds(200)) {
+          const bool was_configured = device->state.configured;
           device->refresh();
           publish(*device, playing);
           poll = Clock::now();
           if (playing && Clock::now() - report >= std::chrono::seconds(10)) {
             const auto &s = device->state;
             flog::info("Astra918 samples={0} dial={1} offset={2} drops={3} "
-                       "capture={4} usb={5} audio={6}/{7}/{8}",
+                       "capture={4} usb={5} audio={6}/{7}/{8} hostdrops={9}",
                        samples.load(), s.requested, s.offset, s.dropped,
                        s.capture_faults, s.usb_faults, s.audio_under,
-                       s.audio_over, s.audio_stalls);
+                       s.audio_over, s.audio_stalls, host_drops.load());
             report = Clock::now();
           }
-          if (playing &&
-              (!device->state.streaming || !device->state.configured)) {
+          if (playing && !device->state.streaming) {
             stop_reader();
             playing = false;
             delivering = false;
             clear_blocks();
             publish(*device, false);
             message("Receiver stopped I/Q or reported a fault; change reference or retry");
+          } else if (playing && !device->state.configured) {
+            message(std::string("RX unavailable (") +
+                    firmware_error_name(device->state.error) +
+                    "). Streaming zero I/Q. Use Retry to restore reception");
+          } else if (playing && !was_configured) {
+            message("Reception resumed");
           }
         }
         {
@@ -315,7 +327,7 @@ class Source : public ModuleManager::Instance {
         if (device) {
           try {
             device->refresh();
-            if (!device->state.configured) {
+            if (!device->state.streaming) {
               stop_reader();
               playing = false;
               delivering = false;
@@ -694,12 +706,21 @@ public:
       std::snprintf(s.address, sizeof(s.address), "%s", endpoint);
       s.selected = true;
       std::atomic<uint64_t> count{0};
+      std::atomic<uint64_t> zeros{0};
+      std::atomic<uint64_t> nonzero{0};
       std::atomic<bool> consume{true};
       std::thread reader([&] {
         while (consume) {
           int n = s.stream.read();
           if (n < 0)
             break;
+          uint64_t muted = 0;
+          for (int i = 0; i < n; i++) {
+            if (s.stream.readBuf[i].re == 0 && s.stream.readBuf[i].im == 0)
+              muted++;
+          }
+          zeros += muted;
+          nonzero += unsigned(n) - muted;
           count += unsigned(n);
           s.stream.flush();
         }
@@ -788,6 +809,36 @@ public:
             sigpath::vfoManager.getOffset("Astra test") != 0)
           throw std::runtime_error(
               "CAT did not propagate to spectrum independently of VFO");
+        // RX recovery changes generation while USB keeps supplying frames.
+        // Delay the UI longer than the bounded queue can hold, as can happen
+        // while the host is handling a TX/RX transition.
+        if (cmx::simulator_cat(endpoint, "FA00007075049;FA;") !=
+            "FA00007075049;")
+          throw std::runtime_error("Recovery retune failed");
+        std::this_thread::sleep_for(std::chrono::milliseconds(900));
+        s.tick();
+        wait([&] { return s.snapshot().state.requested == 7075049; });
+        if (!s.snapshot().connected || !s.snapshot().playing)
+          throw std::runtime_error("Generation change stopped playback");
+        for (unsigned cycle = 0; cycle < 4; cycle++) {
+          s.set(0x70, {4}); // Simulated TX keeps audio and I/Q enumerated.
+          auto muted = zeros.load();
+          wait([&] { return zeros > muted + 12000; });
+          s.set(0x70, {0});
+          auto received = nonzero.load();
+          wait([&] { return nonzero > received + 12000; });
+          if (!s.snapshot().connected || !s.snapshot().playing)
+            throw std::runtime_error("TX/RX cycle stopped playback");
+        }
+        s.set(0x70, {1}); // Fail the next simulated RF configuration.
+        s.set(cmx::SetFrequency, cmx::integer(7076049, 8));
+        wait([&] { return !s.snapshot().state.configured; });
+        auto muted = zeros.load();
+        wait([&] { return zeros > muted + 36000; });
+        if (!s.snapshot().connected || !s.snapshot().playing)
+          throw std::runtime_error("RX recovery zeros stopped playback");
+        s.set(cmx::Retry);
+        wait([&] { return s.snapshot().state.configured; });
         auto n = count.load();
         wait([&] { return count > n + 12000; });
         s.stop();
@@ -813,7 +864,8 @@ public:
           throw std::runtime_error("Play reconnect overwrote receiver state");
         flog::info(
             "Astra module: independent VFOs, center plus audio offset, CAT "
-            "synchronization, stream/stop/reconnect passed");
+            "synchronization, TX/RX zeros, delayed GUI, RF recovery, "
+            "stream/stop/reconnect passed");
       } catch (const std::exception &e) {
         flog::error("Astra module test failed: {0}", e.what());
         result = 1;

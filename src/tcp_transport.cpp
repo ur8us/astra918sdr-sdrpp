@@ -81,7 +81,7 @@ struct Tcp final : Transport {
       throw std::runtime_error("Invalid simulator port");
     try {
       control = connect_to(host, port);
-      timeout(control, 5000);
+      timeout(control, control_timeout_ms);
       iq = connect_to(host, port + 1);
     } catch (...) {
       if (control != invalid)

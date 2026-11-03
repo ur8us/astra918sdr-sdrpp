@@ -14,7 +14,8 @@ Bytes Device::command(uint8_t cmd, const Bytes &p) {
     auto seq = ++sequence;
     transport->write_control(record(cmd, seq, p));
     Bytes b;
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(control_timeout_ms);
     while (b.size() < record_size) {
       if (std::chrono::steady_clock::now() >= deadline)
         throw std::runtime_error(

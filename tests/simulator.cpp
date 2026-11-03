@@ -2,17 +2,30 @@
 #include "cmx918_device.h"
 #include <chrono>
 #include <iostream>
+#include <thread>
 // Reproduce a USB FIFO containing the tail of an interrupted old frame. The
 // same client lifecycle must drain this before accepting a new generation.
 class StaleIqTransport final : public cmx::Transport {
   std::unique_ptr<cmx::Transport> inner;
   bool stale = true;
+  std::chrono::steady_clock::time_point reply_ready{};
 
 public:
+  bool delay_next_status = false;
   explicit StaleIqTransport(std::unique_ptr<cmx::Transport> t)
       : inner(std::move(t)) {}
-  void write_control(const cmx::Bytes &b) override { inner->write_control(b); }
+  void write_control(const cmx::Bytes &b) override {
+    inner->write_control(b);
+    if (b[5] == cmx::Status && delay_next_status) {
+      delay_next_status = false;
+      reply_ready = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    }
+  }
   cmx::Bytes read_control(size_t n, unsigned timeout) override {
+    if (std::chrono::steady_clock::now() < reply_ready) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
+      return {};
+    }
     return inner->read_control(n, timeout);
   }
   cmx::Bytes read_iq(size_t n, unsigned timeout) override {
@@ -25,8 +38,10 @@ public:
 };
 int main(int argc, char **argv) {
   try {
-    cmx::Device d(std::make_unique<StaleIqTransport>(
-        cmx::open_tcp(argc > 1 ? argv[1] : "127.0.0.1:7350")));
+    auto transport = std::make_unique<StaleIqTransport>(
+        cmx::open_tcp(argc > 1 ? argv[1] : "127.0.0.1:7350"));
+    auto *timing = transport.get();
+    cmx::Device d(std::move(transport));
     d.frequency(14074049);
     d.state =
         cmx::State::decode(d.command(cmx::SetOffset, cmx::integer(10000, 4)));
@@ -44,6 +59,9 @@ int main(int argc, char **argv) {
       }
     }
     d.stop();
+    // Firmware may service STATUS only after its eight-second RX recovery.
+    // A delayed valid reply must retain control synchronization.
+    timing->delay_next_status = true;
     d.refresh();
     if (samples < 120000 || !d.state.configured || d.state.streaming)
       throw std::runtime_error("Independent stream lifecycle failed");

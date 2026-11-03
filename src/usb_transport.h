@@ -2,6 +2,8 @@
 #include "cmx918_protocol.h"
 #include <memory>
 namespace cmx {
+// Firmware RF reconfiguration can take eight seconds, plus relay/reset delays.
+constexpr unsigned control_timeout_ms = 15000;
 struct Transport {
   virtual ~Transport() = default;
   virtual void write_control(const Bytes &) = 0;

@@ -145,7 +145,13 @@ Control commands and I/Q reads run on separate threads so receiver
 reconfiguration cannot starve the USB stream. Start first stops and drains any
 partial frame left by a previous owner or stalled transfer. Neither operation
 resets the composite USB device. While playing, the log reports sample totals
-and receiver fault counters every ten seconds.
+and receiver fault counters every ten seconds, including discarded host frames
+as `hostdrops`. If the UI is delayed during a generation change, the bounded
+host queue retains the newest frames and playback continues. TX and RF recovery
+can supply zero I/Q while the receive hardware is unavailable. The source keeps
+playing through those zeros and reports an RF fault in its panel when present.
+Control replies allow up to 15 seconds for firmware reconfiguration and relay
+delays. Firmware ending the stream or a lost USB connection still stops playback.
 
 ## Portable library
 
@@ -252,8 +258,10 @@ The launcher creates only `build/profile/`, loads Astra918, Radio and Audio Sink
 and leaves normal SDR++ preferences alone. Press Connect and Play in the source.
 The lifecycle test creates real upstream VFOs and exercises normal tuning,
 mouse-drag release, external CAT retunes, a secondary VFO, stream delivery,
+TX/RX cycles with zero samples, delayed UI updates, RF fault recovery and
 stop/restart/reconnect. The portable client test also injects stale I/Q bytes
-before Start to verify draining at reconnect.
+before Start to verify draining at reconnect and delays a control reply by six
+seconds to cover recovery beyond the old five-second deadline.
 `ASTRA918_SIMULATOR=HOST:PORT` selects the simulator only in Debug module builds.
 Without it, press Refresh and select the physical receiver serial later.
 

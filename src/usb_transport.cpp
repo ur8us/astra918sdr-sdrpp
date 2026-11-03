@@ -108,7 +108,7 @@ public:
       int actual = 0;
       int rc = libusb_bulk_transfer(
           handle, command_ep, const_cast<unsigned char *>(b.data() + used),
-          int(b.size() - used), &actual, 5000);
+          int(b.size() - used), &actual, control_timeout_ms);
       check(rc, "write command");
       if (actual <= 0)
         throw std::runtime_error("No USB write progress");
