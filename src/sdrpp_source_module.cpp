@@ -238,6 +238,7 @@ class Source : public ModuleManager::Instance {
             publish(*device, false);
             poll = Clock::now();
           } else if (request.kind == Request::Disconnect) {
+            const bool had_device = bool(device);
             stop_reader();
             if (device) {
               device->stop();
@@ -249,7 +250,10 @@ class Source : public ModuleManager::Instance {
             std::lock_guard<std::mutex> lock(mutex);
             view.connected = false;
             view.playing = false;
-            view.message = "Disconnected";
+            // Play failure invokes Stop too. Keep the original connection
+            // error visible when there was no device to disconnect.
+            if (had_device)
+              view.message = "Disconnected";
           } else if (device) {
             if (request.kind == Request::Start) {
               stop_reader();

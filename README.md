@@ -130,6 +130,10 @@ module’s demodulation mode controls only local SDR++ listening. Stop releases
 I/Q streaming and disconnects the receiver, releasing the vendor interface
 without resetting audio or CAT. SDR++ Play connects the receiver and starts I/Q;
 Stop disconnects it. Close/disconnect the standalone GUI before using this source.
+If another application owns the USB control interface, the source panel shows
+an explicit interface-busy message. After releasing the interface in that
+application, press Play again to connect. The message remains visible when
+SDR++ returns the Play button to its stopped state.
 
 Firmware audio offset edits use the existing atomic command 38. The receiver
 must support this command; older firmware shows a firmware-update message.

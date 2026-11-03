@@ -79,9 +79,14 @@ public:
       int active = 0;
       check(libusb_get_configuration(handle, &active), "USB configuration");
       if (active != 1)
-        throw std::runtime_error("Astra918 USB is not configured; reconnect the device");
-      check(libusb_claim_interface(handle, interface_number),
-            "claim vendor interface");
+        throw std::runtime_error(
+            "Astra918 USB is not configured; reconnect the device");
+      const int claim = libusb_claim_interface(handle, interface_number);
+      if (claim == LIBUSB_ERROR_BUSY)
+        throw std::runtime_error(
+            "Astra918 USB control interface busy. Disconnect the GUI or "
+            "another SDR application, then press Play again.");
+      check(claim, "claim vendor interface");
       claimed = true;
     } catch (...) {
       if (handle)
