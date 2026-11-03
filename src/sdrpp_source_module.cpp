@@ -223,7 +223,7 @@ class Source : public ModuleManager::Instance {
           device = std::make_unique<cmx::Device>(
               request.simulator ? cmx::open_tcp(request.target)
                                 : cmx::open_usb(request.target));
-          message("Connected; adopted receiver settings");
+          message("Connected; adopted transceiver settings");
           publish(*device, false);
           poll = Clock::now();
         }
@@ -239,7 +239,7 @@ class Source : public ModuleManager::Instance {
             device = std::make_unique<cmx::Device>(
                 request.simulator ? cmx::open_tcp(request.target)
                                   : cmx::open_usb(request.target));
-            message("Connected; adopted receiver settings");
+            message("Connected; adopted transceiver settings");
             publish(*device, false);
             poll = Clock::now();
           } else if (request.kind == Request::Disconnect) {
@@ -276,7 +276,7 @@ class Source : public ModuleManager::Instance {
             } else {
               device->state = cmx::State::decode(
                   device->command(request.cmd, request.payload));
-              message(request.cmd == cmx::Save ? "Settings saved to receiver"
+              message(request.cmd == cmx::Save ? "Settings saved to transceiver"
                                                : "Applied");
             }
             publish(*device, playing);
@@ -302,7 +302,7 @@ class Source : public ModuleManager::Instance {
             delivering = false;
             clear_blocks();
             publish(*device, false);
-            message("Receiver stopped I/Q or reported a fault; change reference or retry");
+            message("Transceiver stopped I/Q or reported a fault; retry the transceiver");
           } else if (playing && !device->state.configured) {
             message(std::string("RX unavailable (") +
                     firmware_error_name(device->state.error) +
@@ -513,96 +513,37 @@ class Source : public ModuleManager::Instance {
     if (!simulator && !discovery_attempted)
       refresh_receivers();
     auto v = snapshot();
-    ImGui::TextWrapped("%s", v.message.c_str());
-    ImGui::BeginDisabled(v.connected);
+    if (!v.connected) {
+      ImGui::TextWrapped("%s", v.message.c_str());
 #ifndef NDEBUG
-    ImGui::Checkbox("Offline simulator", &simulator);
-    if (simulator) {
-      field("Address");
-      ImGui::InputText("##Address", address, sizeof(address));
-    } else
+      ImGui::Checkbox("Offline simulator", &simulator);
+      if (simulator) {
+        field("Address");
+        ImGui::InputText("##Address", address, sizeof(address));
+      } else
 #endif
-    {
-      field("Receiver");
-      if (ImGui::BeginCombo("##Receiver", serial.empty() ? "Select receiver"
-                                                         : serial.c_str())) {
-        for (auto &d : devices) {
-          if (ImGui::Selectable(d.label.c_str(), serial == d.serial))
-            serial = d.serial;
+      {
+        field("Transceiver serial number");
+        if (ImGui::BeginCombo("##Transceiver serial", serial.empty()
+                                                          ? "Select transceiver"
+                                                          : serial.c_str())) {
+          for (auto &d : devices) {
+            if (ImGui::Selectable(d.label.c_str(), serial == d.serial))
+              serial = d.serial;
+          }
+          ImGui::EndCombo();
         }
-        ImGui::EndCombo();
+        if (ImGui::Button("Refresh"))
+          refresh_receivers();
       }
-      if (ImGui::Button("Refresh"))
-        refresh_receivers();
-    }
-    ImGui::EndDisabled();
-    ImGui::TextWrapped("I/Q: 120 ksps; USB audio: 12 kHz mono");
-    if (!v.connected)
       return;
+    }
+    if (v.message != "Connected; adopted transceiver settings")
+      ImGui::TextWrapped("%s", v.message.c_str());
     auto s = v.state;
     ImGui::Separator();
     ImGui::Text("Spectrum center: %.6f MHz", s.center / 1e6);
     ImGui::Text("Firmware USB audio: %.6f MHz", s.requested / 1e6);
-    field("Firmware USB audio offset (Hz)");
-    draft_dirty |=
-        ImGui::InputInt("##Firmware USB audio offset", &offset_draft);
-    if (ImGui::Button("Apply offset")) {
-      const int64_t dial = int64_t(s.center) + offset_draft;
-      if (dial >= 70000 && dial <= 260000000)
-        set(cmx::TuneChannel, cmx::integer(uint64_t(dial), 8));
-      else
-        message("Firmware USB audio frequency is out of range");
-      draft_dirty = false;
-    }
-    int mode = s.audio_mode == 2 ? 0 : 1;
-    field("Firmware USB audio mode");
-    if (ImGui::Combo("##USB audio mode", &mode, "USB\0LSB\0"))
-      set(cmx::SetAudioMode, {uint8_t(mode ? 1 : 2)});
-    field("Audio low cut (Hz)");
-    draft_dirty |= ImGui::InputInt("##Audio low cut", &low_draft);
-    field("Audio high cut (Hz)");
-    draft_dirty |= ImGui::InputInt("##Audio high cut", &high_draft);
-    if (ImGui::Button("Apply audio filter")) {
-      if (low_draft >= 0 && high_draft <= 5000 && low_draft < high_draft) {
-        auto p = cmx::integer(low_draft, 2);
-        auto high = cmx::integer(high_draft, 2);
-        p.insert(p.end(), high.begin(), high.end());
-        set(cmx::SetAudioFilter, p);
-      }
-      draft_dirty = false;
-    }
-    ImGui::Separator();
-    if (v.capabilities.vfo_if_selection) {
-      int sign = s.vfo_sign;
-      field("VFO sign");
-      if (ImGui::Combo("##VFO sign", &sign,
-                       "Auto\0LO above the signal\0LO below the signal\0"))
-        set(cmx::SetVfoSign, {uint8_t(sign)});
-      int frequency = s.if_frequency;
-      field("IF frequency");
-      if (ImGui::Combo("##IF frequency", &frequency,
-                       "Auto (96 kHz)\0" "96 kHz\0" "120 kHz\0"))
-        set(cmx::SetIfFrequency, {uint8_t(frequency)});
-    }
-    if (v.capabilities.reference_clock) {
-      int reference = s.reference_clock;
-      field("38.4 MHz reference");
-      if (ImGui::Combo("##38.4 MHz reference", &reference, "Internal\0External\0"))
-        set(cmx::SetReference, {uint8_t(reference)});
-    }
-    if (v.capabilities.logical_gpio) {
-      ImGui::TextUnformatted("Logical GPIO");
-      for (int i = 0; i < 8; ++i) {
-        if (i % 4)
-          ImGui::SameLine();
-        bool enabled = (s.gpio & (1u << i)) != 0;
-        std::string label = "GPIO" + std::to_string(i);
-        if (ImGui::Checkbox(label.c_str(), &enabled)) {
-          uint8_t mask = uint8_t(1u << i);
-          set(cmx::UpdateGpio, {mask, uint8_t(enabled ? mask : 0)});
-        }
-      }
-    }
     ImGui::Separator();
     int input = s.input;
     field("Antenna input");
@@ -641,13 +582,57 @@ class Source : public ModuleManager::Instance {
     }
     ImGui::Text("Capacitance: %.1f pF",
                 cmx::lf_mf_capacitance_pf(s.lf_mf_capacitor));
-    if (ImGui::Button("Save to receiver"))
+    ImGui::Separator();
+    field("Firmware USB audio offset (Hz)");
+    draft_dirty |=
+        ImGui::InputInt("##Firmware USB audio offset", &offset_draft);
+    if (ImGui::Button("Apply offset")) {
+      const int64_t dial = int64_t(s.center) + offset_draft;
+      if (dial >= 70000 && dial <= 260000000)
+        set(cmx::TuneChannel, cmx::integer(uint64_t(dial), 8));
+      else
+        message("Firmware USB audio frequency is out of range");
+      draft_dirty = false;
+    }
+    int mode = s.audio_mode == 2 ? 0 : 1;
+    field("Firmware USB audio mode");
+    if (ImGui::Combo("##USB audio mode", &mode, "USB\0LSB\0"))
+      set(cmx::SetAudioMode, {uint8_t(mode ? 1 : 2)});
+    field("Audio low cut (Hz)");
+    draft_dirty |= ImGui::InputInt("##Audio low cut", &low_draft);
+    field("Audio high cut (Hz)");
+    draft_dirty |= ImGui::InputInt("##Audio high cut", &high_draft);
+    if (ImGui::Button("Apply audio filter")) {
+      if (low_draft >= 0 && high_draft <= 5000 && low_draft < high_draft) {
+        auto p = cmx::integer(low_draft, 2);
+        auto high = cmx::integer(high_draft, 2);
+        p.insert(p.end(), high.begin(), high.end());
+        set(cmx::SetAudioFilter, p);
+      }
+      draft_dirty = false;
+    }
+    ImGui::Separator();
+    if (v.capabilities.logical_gpio) {
+      ImGui::TextUnformatted("Logical outputs");
+      for (int i = 0; i < 8; ++i) {
+        if (i % 4)
+          ImGui::SameLine();
+        bool enabled = (s.gpio & (1u << i)) != 0;
+        std::string label = "Out" + std::to_string(i);
+        if (ImGui::Checkbox(label.c_str(), &enabled)) {
+          uint8_t mask = uint8_t(1u << i);
+          set(cmx::UpdateGpio, {mask, uint8_t(enabled ? mask : 0)});
+        }
+      }
+    }
+    if (ImGui::Button("Save to transceiver"))
       set(cmx::Save);
     ImGui::SameLine();
-    if (ImGui::Button("Retry receiver"))
+    if (ImGui::Button("Retry transceiver"))
       set(cmx::Retry);
-    ImGui::Text("Revision %u; %s", s.revision,
+    ImGui::Text("FW revision %u; %s", s.revision,
                 s.saved_revision == s.revision ? "saved" : "unsaved");
+    ImGui::TextWrapped("I/Q: 120 ksps; USB audio: 12 kHz mono");
     ImGui::TextWrapped("IQ drops %u; capture %u; USB %u", s.dropped,
                        s.capture_faults, s.usb_faults);
     ImGui::TextWrapped("Audio underruns %u; overruns %u; stalls %u",
@@ -682,6 +667,13 @@ public:
   static int self_test(const char *endpoint) {
     core::args.defineAll();
     auto *ctx = ImGui::CreateContext();
+    auto &io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(800, 2000);
+    io.DeltaTime = 1.0f / 60.0f;
+    io.IniFilename = nullptr;
+    unsigned char *pixels;
+    int width, height;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
     static dsp::stream<dsp::complex_t> dummy;
     sigpath::iqFrontEnd.init(
         &dummy, 120000, false, 1, false, 1024, 20, IQFrontEnd::BLACKMAN,
@@ -736,9 +728,47 @@ public:
                                    s.snapshot().message);
       };
       try {
+        auto menu_text = [&] {
+          ImGui::NewFrame();
+          ImGui::SetNextWindowSize(ImVec2(780, 1900), ImGuiCond_Always);
+          ImGui::Begin("Astra panel check");
+          ImGui::LogToBuffer();
+          s.menu();
+          std::string text = ctx->LogBuffer.c_str();
+          ImGui::LogFinish();
+          ImGui::End();
+          ImGui::EndFrame();
+          return text;
+        };
+#ifdef NDEBUG
+        const auto disconnected_panel = menu_text();
+        if (disconnected_panel.find("Transceiver serial number") ==
+                std::string::npos ||
+            disconnected_panel.find("Refresh") == std::string::npos)
+          throw std::runtime_error(
+              "Disconnected panel is missing connection controls");
+#endif
         s.connect();
         wait([&] { return s.snapshot().connected; });
         s.tick();
+        const auto panel = menu_text();
+        const auto offset = panel.find("Firmware USB audio offset");
+        const auto revision = panel.find("FW revision");
+        const auto rate = panel.find("I/Q: 120 ksps");
+        if (panel.find("Transceiver serial number") != std::string::npos ||
+            panel.find("Refresh") != std::string::npos ||
+            panel.find("adopted transceiver settings") != std::string::npos ||
+            panel.find("VFO sign") != std::string::npos ||
+            panel.find("IF frequency") != std::string::npos ||
+            panel.find("38.4 MHz reference") != std::string::npos ||
+            panel.find("Logical outputs") == std::string::npos ||
+            panel.find("Out7") == std::string::npos ||
+            offset == std::string::npos || revision == std::string::npos ||
+            rate == std::string::npos ||
+            panel.find("Antenna input") >= offset ||
+            panel.find("LF/MF capacitor") >= offset || rate <= revision)
+          throw std::runtime_error(
+              "Connected source-panel layout regression: " + panel);
         s.set(cmx::SetOffset, cmx::integer(10000, 4));
         wait([&] { return s.snapshot().state.offset == 10000; });
         s.tick();
