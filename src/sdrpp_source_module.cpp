@@ -302,7 +302,8 @@ class Source : public ModuleManager::Instance {
             delivering = false;
             clear_blocks();
             publish(*device, false);
-            message("Transceiver stopped I/Q or reported a fault; retry the transceiver");
+            message("Transceiver stopped I/Q or reported a fault; retry the "
+                    "transceiver");
           } else if (playing && !device->state.configured) {
             message(std::string("RX unavailable (") +
                     firmware_error_name(device->state.error) +
@@ -736,7 +737,12 @@ public:
           ImGui::Begin("Astra panel check");
           ImGui::LogToBuffer();
           s.menu();
-          std::string text = ctx->LogBuffer.c_str();
+          // c_str() references ImGuiTextBuffer::EmptyString, which the Windows
+          // SDR++ core does not export. Read the owned buffer directly.
+          const auto &buffer = ctx->LogBuffer.Buf;
+          std::string text = buffer.Size > 0
+                                 ? std::string(buffer.Data, buffer.Size - 1)
+                                 : std::string();
           ImGui::LogFinish();
           ImGui::End();
           ImGui::EndFrame();
